@@ -1,0 +1,236 @@
+# LLM Abstraction Design
+
+## 概述
+
+LLM 层采用 Provider 模式，通过抽象基类 `LLMBase` 定义标准接口，每个模型（Qwen / Claude / GPT / Ollama）对应一个 Provider 实现。工厂模式根据配置动态加载，支持运行时切换模型，零代码改动。
+
+## 目录结构
+
+```
+services/
+├── llm_service.py        # 工厂 + 所有 Provider 实现
+└── providers/
+    ├── __init__.py
+    ├── base.py           # LLMBase 抽象基类
+    ├── qwen_provider.py  # 通义千问 Provider
+    ├── openai_provider.py # GPT Provider（扩展）
+    └── mock_provider.py  # 测试用 Mock Provider
+```
+
+## 核心接口: LLMBase
+
+```python
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import AsyncGenerator
+
+@dataclass
+class ChatMessage:
+    role: Literal["system", "user", "assistant"]
+    content: str
+
+@dataclass
+class ChatResponse:
+    content: str
+    model: str
+    tokens_used: int
+    latency_ms: int
+    finish_reason: str
+
+class LLMBase(ABC):
+    """所有 LLM Provider 必须实现的抽象基类"""
+
+    @abstractmethod
+    async def chat(
+        self,
+        messages: list[ChatMessage],
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        request_id: str | None = None,
+    ) -> ChatResponse:
+        """
+        同步调用，返回完整响应
+        """
+        pass
+
+    @abstractmethod
+    async def chat_stream(
+        self,
+        messages: list[ChatMessage],
+        temperature: float = 0.7,
+        max_tokens: int | None = None,
+        request_id: str | None = None,
+    ) -> AsyncGenerator[str, None]:
+        """
+        流式调用，AsyncGenerator 逐字产出内容
+        """
+        pass
+
+    @abstractmethod
+    def count_tokens(self, text: str) -> int:
+        """计算 token 数量，用于 token 预算控制"""
+        pass
+
+    @abstractmethod
+    def get_model_name(self) -> str:
+        """返回当前模型名称"""
+        pass
+
+    @abstractmethod
+    def get_max_context_window(self) -> int:
+        """返回模型最大上下文窗口（tokens）"""
+        pass
+
+    def supports_streaming(self) -> bool:
+        """判断当前 Provider 是否支持流式输出，默认 True"""
+        return True
+```
+
+## Provider 实现规范
+
+### 必须覆盖的字段
+
+每个 Provider 实现必须在 `__init__` 中从 `config.py` 读取以下配置：
+
+```python
+class QwenProvider(LLMBase):
+    def __init__(self, config: LLMConfig):
+        self.model_name = config.model_name          # 如 "qwen-max"
+        self.api_key = config.api_key
+        self.base_url = config.base_url              # 如 "https://dashscope.aliyuncs.com"
+        self.timeout = config.timeout                # 默认 60s
+        self.max_retries = config.max_retries        # 默认 3
+```
+
+### chat() 实现模板
+
+```python
+async def chat(self, messages, temperature, max_tokens, request_id) -> ChatResponse:
+    start = time.monotonic()
+    headers = {
+        "Authorization": f"Bearer {self.api_key}",
+        "Content-Type": "application/json",
+        "X-Request-Id": request_id or "",
+    }
+    payload = {
+        "model": self.model_name,
+        "messages": [{"role": m.role, "content": m.content} for m in messages],
+        "temperature": temperature,
+        **({"max_tokens": max_tokens} if max_tokens else {}),
+    }
+    async with httpx.AsyncClient(timeout=self.timeout) as client:
+        for attempt in range(self.max_retries):
+            try:
+                response = await client.post(f"{self.base_url}/v1/chat/completions", ...)
+                response.raise_for_status()
+                data = response.json()
+                return ChatResponse(
+                    content=data["choices"][0]["message"]["content"],
+                    model=self.model_name,
+                    tokens_used=data["usage"]["total_tokens"],
+                    latency_ms=int((time.monotonic() - start) * 1000),
+                    finish_reason=data["choices"][0]["finish_reason"],
+                )
+            except httpx.HTTPStatusError as e:
+                if e.response.status_code in (429, 500, 502, 503):
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                raise LLMError(f"HTTP {e.response.status_code}: {e.response.text}")
+```
+
+## 工厂模式: LLMFactory
+
+```python
+class LLMFactory:
+    _providers: dict[str, type[LLMBase]] = {}
+
+    @classmethod
+    def register(cls, name: str, provider_class: type[LLMBase]):
+        """注册 Provider，装饰器 @register_provider("qwen") 使用"""
+        cls._providers[name] = provider_class
+
+    @classmethod
+    def create(cls, provider_name: str, config: LLMConfig) -> LLMBase:
+        if provider_name not in cls._providers:
+            raise ValueError(f"Unknown provider: {provider_name}. Available: {list(cls._providers)}")
+        return cls._providers[provider_name](config)
+
+    @classmethod
+    def list_providers(cls) -> list[str]:
+        return list(cls._providers.keys())
+
+# 注册装饰器
+def register_provider(name: str):
+    def decorator(cls: type[LLMBase]):
+        LLMFactory.register(name, cls)
+        return cls
+    return decorator
+
+@register_provider("qwen")
+class QwenProvider(LLMBase): ...
+```
+
+## 配置驱动切换
+
+`config.py` 中定义：
+
+```python
+@dataclass
+class LLMConfig:
+    provider: str = "qwen"          # 切换模型只需改这里
+    model_name: str = "qwen-max"    # qwen-max / qwen-plus / qwen-turbo
+    api_key: str = ""
+    base_url: str = "https://dashscope.aliyuncs.com"
+    timeout: int = 60
+    max_retries: int = 3
+    default_temperature: float = 0.7
+    default_max_tokens: int = 2048
+```
+
+**切换模型**: 改 `config.py` 中的 `provider` 和 `model_name`，不改动任何业务代码。
+
+## Token 预算控制
+
+在 PromptBuilder 中必须调用 `count_tokens()` 进行预算控制：
+
+```python
+def build(self, query, context, intent, history):
+    system_prompt = SYSTEM_TEMPLATES[intent]
+    available_tokens = self.max_context - self._count_prompt_tokens(system_prompt, query, context)
+
+    # 动态截断 context，确保不超过窗口
+    context = self._truncate_context(context, available_tokens)
+    ...
+```
+
+## Mock Provider
+
+`mock_provider.py` 用于本地测试和 CI，不依赖真实 API：
+
+```python
+@register_provider("mock")
+class MockProvider(LLMBase):
+    async def chat(self, messages, temperature, max_tokens, request_id):
+        return ChatResponse(
+            content=f"[Mock] 您说的是: {messages[-1].content}",
+            model="mock-gpt-3.5",
+            tokens_used=100,
+            latency_ms=50,
+            finish_reason="stop",
+        )
+```
+
+## 扩展指南: 新增 Provider
+
+1. 在 `providers/` 下创建 `xxx_provider.py`
+2. 继承 `LLMBase`，实现全部抽象方法
+3. 使用 `@register_provider("xxx")` 注册
+4. 在 `config.py` 的 `LLMConfig` 中添加 provider 选项
+5. 验证流式输出: `await provider.chat_stream(...)` 必须能产生 AsyncGenerator
+
+## 禁止事项
+
+- 禁止在业务层直接 `import httpx` 调用 LLM API
+- 禁止硬编码模型名称或 API URL
+- 禁止在 Provider 内部打印日志（统一由调用方记录）
+- 禁止修改 `LLMBase` 抽象方法签名（破坏兼容）

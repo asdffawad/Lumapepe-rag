@@ -1,0 +1,1534 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG 管理后台</title>
+<style>
+:root {
+  --ink: #1a1625;
+  --ink-2: #3d3852;
+  --ink-3: #7c7891;
+  --ink-4: #b0a9c0;
+  --paper: #f5f2ff;
+  --paper-2: #ece7f7;
+  --paper-3: #d8d0ed;
+  --violet: #6d28d9;
+  --violet-light: #ede9fe;
+  --emerald: #059669;
+  --emerald-light: #d1fae5;
+  --amber: #d97706;
+  --amber-light: #fef3c7;
+  --rose: #e11d48;
+  --rose-light: #ffe4e6;
+  --slate: #64748b;
+  --white: #ffffff;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Top nav ────────────────────────────────────────────────────── */
+.topnav {
+  background: var(--ink);
+  color: white;
+  padding: 0 32px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 12px rgba(26,22,37,0.3);
+}
+.topnav h1 { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; }
+.topnav a { color: rgba(255,255,255,0.65); text-decoration: none; font-size: 13px; transition: color 0.2s; }
+.topnav a:hover { color: white; }
+
+/* ── Tab bar ───────────────────────────────────────────────────── */
+.tab-bar {
+  background: var(--white);
+  display: flex;
+  gap: 4px;
+  padding: 8px 32px 0;
+  border-bottom: 2px solid var(--paper-3);
+}
+.tab-btn {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-3);
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  border-radius: 8px 8px 0 0;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tab-btn:hover { color: var(--violet); background: var(--violet-light); }
+.tab-btn.active { color: var(--violet); border-bottom-color: var(--violet); background: var(--violet-light); }
+
+/* ── Content ───────────────────────────────────────────────────── */
+.content { max-width: 1280px; margin: 0 auto; padding: 28px 32px; }
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ── Section heading ────────────────────────────────────────────── */
+.section { margin-bottom: 28px; }
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.section-title {
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--ink-3);
+}
+
+/* ── Card ──────────────────────────────────────────────────────── */
+.card {
+  background: var(--white);
+  border-radius: 16px;
+  box-shadow: 0 1px 4px rgba(26,22,37,0.06), 0 4px 16px rgba(26,22,37,0.04);
+  padding: 22px 24px;
+  margin-bottom: 16px;
+  border: 1px solid var(--paper-2);
+}
+.card:hover { box-shadow: 0 2px 8px rgba(26,22,37,0.08), 0 8px 24px rgba(26,22,37,0.06); }
+
+/* ── Pill tags ─────────────────────────────────────────────────── */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.pill-done   { background: var(--emerald-light); color: var(--emerald); }
+.pill-pending{ background: var(--amber-light);  color: var(--amber); }
+.pill-failed { background: var(--rose-light);   color: var(--rose); }
+.pill-info   { background: var(--violet-light); color: var(--violet); }
+
+/* ── Stat blocks ───────────────────────────────────────────────── */
+.stats-row {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 12px;
+  margin-bottom: 16px;
+}
+.stat-block {
+  background: var(--white);
+  border-radius: 14px;
+  padding: 18px 16px;
+  text-align: center;
+  border: 1px solid var(--paper-2);
+  box-shadow: 0 1px 4px rgba(26,22,37,0.05);
+  transition: transform 0.2s, box-shadow 0.2s;
+}
+.stat-block:hover { transform: translateY(-2px); box-shadow: 0 4px 12px rgba(26,22,37,0.1); }
+.stat-num { font-size: 28px; font-weight: 800; line-height: 1; margin-bottom: 6px; }
+.stat-num.added   { color: var(--emerald); }
+.stat-num.updated { color: var(--violet); }
+.stat-num.unchanged { color: var(--ink-4); }
+.stat-num.deleted { color: var(--rose); }
+.stat-num.errors  { color: var(--amber); }
+.stat-label { font-size: 11px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* ── Buttons ───────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 18px;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+.btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.btn:active { transform: translateY(0); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-violet  { background: var(--violet); color: white; }
+.btn-violet:hover { background: #5b21b6; }
+.btn-emerald { background: var(--emerald); color: white; }
+.btn-emerald:hover { background: #047857; }
+.btn-amber  { background: var(--amber); color: white; }
+.btn-amber:hover { background: #b45309; }
+.btn-ghost  { background: transparent; color: var(--ink-2); border: 1.5px solid var(--paper-3); }
+.btn-ghost:hover { background: var(--paper-2); }
+.btn-sm { padding: 5px 12px; font-size: 12px; }
+.btn .spinner {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.btn-ghost .spinner { border-color: var(--paper-3); border-top-color: var(--ink-3); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Toggle ────────────────────────────────────────────────────── */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--paper-2);
+  flex-wrap: wrap;
+}
+.toggle-label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.toggle-label span { font-size: 14px; font-weight: 600; color: var(--ink); }
+.toggle-label small { font-size: 12px; color: var(--ink-3); }
+.toggle {
+  position: relative; width: 44px; height: 24px; flex-shrink: 0;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; inset: 0;
+  background: var(--paper-3);
+  border-radius: 999px;
+  transition: background 0.25s;
+  cursor: pointer;
+}
+.toggle-slider::before {
+  content: ''; position: absolute;
+  left: 3px; top: 3px;
+  width: 18px; height: 18px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.25s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle input:checked + .toggle-slider { background: var(--violet); }
+.toggle input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+/* ── Detail list ────────────────────────────────────────────────── */
+.detail-list { display: flex; flex-direction: column; gap: 8px; max-height: 400px; overflow-y: auto; }
+.detail-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: 10px;
+  border: 1px solid var(--paper-2);
+  background: var(--paper);
+  font-size: 13px;
+  transition: border-color 0.2s;
+}
+.detail-item:hover { border-color: var(--paper-3); }
+.detail-item .action-tag {
+  flex-shrink: 0;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  min-width: 72px;
+  text-align: center;
+}
+.detail-item .action-tag.created  { background: var(--emerald-light); color: var(--emerald); }
+.detail-item .action-tag.updated  { background: var(--violet-light);  color: var(--violet); }
+.detail-item .action-tag.unchanged { background: var(--paper-2); color: var(--ink-4); }
+.detail-item .action-tag.deleted  { background: var(--rose-light);   color: var(--rose); }
+.detail-item .action-tag.error   { background: var(--amber-light);  color: var(--amber); }
+.detail-path { font-family: 'Courier New', monospace; font-size: 12px; color: var(--ink-2); flex: 1; word-break: break-all; }
+.detail-meta { font-size: 11px; color: var(--ink-4); flex-shrink: 0; }
+
+/* ── File scan table ─────────────────────────────────────────────── */
+.file-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.file-table th {
+  text-align: left; padding: 10px 14px;
+  background: var(--paper-2); color: var(--ink-3);
+  font-weight: 700; font-size: 11px;
+  text-transform: uppercase; letter-spacing: 0.05em;
+  border-radius: 8px 8px 0 0;
+}
+.file-table td {
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--paper-2);
+  color: var(--ink-2);
+}
+.file-table tr:last-child td { border-bottom: none; }
+.file-table tr:hover td { background: var(--paper); }
+.file-table .mono { font-family: 'Courier New', monospace; font-size: 12px; color: var(--ink-3); }
+
+/* ── Beat schedule ──────────────────────────────────────────────── */
+.beat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 12px; }
+.beat-card {
+  padding: 14px 16px;
+  border-radius: 10px;
+  border: 1px solid var(--paper-2);
+  background: var(--paper);
+}
+.beat-name { font-weight: 700; font-size: 13px; color: var(--ink); margin-bottom: 6px; display: flex; align-items: center; gap: 6px; }
+.beat-schedule { font-size: 12px; color: var(--violet); font-family: 'Courier New', monospace; }
+.beat-task { font-size: 11px; color: var(--ink-4); margin-top: 4px; font-family: 'Courier New', monospace; }
+
+/* ── Log area ───────────────────────────────────────────────────── */
+.log-area {
+  background: #0f0e17;
+  color: #a8b3cf;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 16px 18px;
+  border-radius: 10px;
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.log-ts { color: #4a5568; margin-right: 8px; }
+.log-ok  { color: #6ee7b7; }
+.log-warn { color: #fde68a; }
+.log-err  { color: #fca5a5; }
+.log-info { color: #93c5fd; }
+
+/* ── Toast ─────────────────────────────────────────────────────── */
+#toast {
+  position: fixed; bottom: 28px; right: 28px;
+  background: var(--ink); color: white;
+  padding: 12px 20px; border-radius: 12px;
+  font-size: 13px; font-weight: 600;
+  z-index: 1000; opacity: 0; transform: translateY(16px);
+  transition: all 0.3s; pointer-events: none;
+  max-width: 340px;
+}
+#toast.show { opacity: 1; transform: translateY(0); }
+#toast.success { background: var(--emerald); }
+#toast.error   { background: var(--rose); }
+#toast.warning { background: var(--amber); }
+
+/* ── Stage card (retrieve timeline) ─────────────────────────── */
+.stage-card {
+  background: var(--white);
+  border-radius: 14px;
+  border: 1px solid var(--paper-2);
+  margin-bottom: 12px;
+  overflow: hidden;
+  transition: box-shadow 0.2s;
+}
+.stage-card:hover { box-shadow: 0 2px 8px rgba(26,22,37,0.08); }
+.stage-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--paper);
+  border-bottom: 1px solid transparent;
+  transition: background 0.2s;
+}
+.stage-header:hover { background: var(--paper-2); }
+.stage-card.open .stage-header { border-bottom-color: var(--paper-2); }
+.stage-arrow {
+  width: 18px; height: 18px;
+  flex-shrink: 0;
+  transition: transform 0.2s;
+  color: var(--ink-3);
+}
+.stage-card.open .stage-arrow { transform: rotate(90deg); }
+.stage-title { font-size: 14px; font-weight: 700; color: var(--ink); flex: 1; }
+.stage-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.stage-badge .count { background: var(--violet-light); color: var(--violet); margin-right: 6px; }
+.stage-badge .time { background: var(--paper-2); color: var(--ink-3); }
+.stage-content { display: none; padding: 0; }
+.stage-card.open .stage-content { display: block; }
+
+/* Doc row in stage table */
+.doc-row { border-bottom: 1px solid var(--paper-2); }
+.doc-row:last-child { border-bottom: none; }
+.doc-row-header {
+  display: grid;
+  gap: 10px;
+  padding: 12px 18px;
+  cursor: pointer;
+  align-items: center;
+  transition: background 0.15s;
+}
+.doc-row-header:hover { background: var(--paper); }
+.doc-row.open .doc-row-header { background: var(--paper-2); }
+.doc-row-expand { display: none; padding: 14px 18px; background: var(--paper); border-top: 1px solid var(--paper-2); }
+.doc-row.open .doc-row-expand { display: block; }
+.meta-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.meta-tag.section { background: var(--violet-light); color: var(--violet); }
+.meta-tag.market { background: var(--emerald-light); color: var(--emerald); }
+.meta-tag.lang { background: var(--amber-light); color: var(--amber); }
+.meta-tag.reason { background: var(--paper-2); color: var(--ink-2); }
+.score-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.score-bar-fill {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--violet);
+  min-width: 2px;
+  max-width: 80px;
+  transition: width 0.3s;
+}
+
+/* LLM stage special */
+.llm-prompt {
+  background: var(--ink);
+  color: #a8b3cf;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 12px 14px;
+  border-radius: 8px;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-bottom: 14px;
+}
+.llm-response {
+  background: var(--violet-light);
+  color: var(--violet);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 14px;
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.llm-meta-row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.llm-meta-row strong { color: var(--ink); }
+
+/* Total latency bar */
+.total-latency {
+  text-align: center;
+  padding: 20px;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--violet);
+  background: var(--white);
+  border-radius: 14px;
+  border: 1px solid var(--paper-2);
+  margin-top: 16px;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .doc-row-header { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- Top Nav -->
+<nav class="topnav">
+  <h1>RAG 管理后台</h1>
+  <div style="display:flex;gap:12px;align-items:center">
+    <a href="/">返回聊天</a>
+    <span style="color:rgba(255,255,255,0.3)">|</span>
+    <a href="/metrics" target="_blank">Prometheus</a>
+  </div>
+</nav>
+
+<!-- Tab Bar -->
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('monitor')">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="22,12 18,12 15,21 9,3 6,12 2,12"/></svg>
+    监控面板
+  </button>
+  <button class="tab-btn" onclick="switchTab('testing')">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10 13,2"/></svg>
+    测试
+  </button>
+  <button class="tab-btn" onclick="switchTab('knowledge')">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>
+    知识库
+  </button>
+  <button class="tab-btn" onclick="switchTab('ingest')">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,16 12,12 8,16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
+    增量摄取
+  </button>
+  <button class="tab-btn" onclick="switchTab('retrieve')">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    检索调试
+  </button>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     PANEL: 监控面板
+═══════════════════════════════════════════════ -->
+<div id="panel-monitor" class="panel active">
+  <div class="content">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">System Overview</span>
+        <span id="mon-last-updated" style="font-size:11px;color:var(--ink-4)"></span>
+      </div>
+      <div class="card">
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:14px">
+          <div class="stat-block">
+            <div class="stat-num" style="color:var(--violet)" id="mon-sessions">-</div>
+            <div class="stat-label">活跃会话</div>
+          </div>
+          <div class="stat-block">
+            <div class="stat-num" style="color:var(--emerald)" id="mon-docs">-</div>
+            <div class="stat-label">已索引文档</div>
+          </div>
+          <div class="stat-block">
+            <div class="stat-num" style="color:var(--ink-4)" id="mon-llm-fail">0</div>
+            <div class="stat-label">LLM 连续失败</div>
+          </div>
+          <div class="stat-block">
+            <div class="stat-num" style="color:var(--amber)" id="mon-latency">-</div>
+            <div class="stat-label">P99 延迟 (ms)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Components</span>
+        <button class="btn btn-ghost btn-sm" onclick="loadMonitor()">
+          <span class="spinner"></span> 刷新
+        </button>
+      </div>
+      <div class="card" id="comp-list">
+        <div style="padding:24px;text-align:center;color:var(--ink-4);font-size:13px">加载中...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     PANEL: 测试
+═══════════════════════════════════════════════ -->
+<div id="panel-testing" class="panel">
+  <div class="content">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">快速测试场景</span>
+      </div>
+      <div class="card">
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+          <button class="btn btn-violet" onclick="runTest('product')">商品咨询</button>
+          <button class="btn btn-emerald" onclick="runTest('order')">订单查询</button>
+          <button class="btn btn-amber" onclick="runTest('refund')">退换货</button>
+          <button class="btn btn-ghost" onclick="runTest('general')">通用问答</button>
+          <button class="btn btn-ghost" onclick="runTest('multi')">多轮对话</button>
+        </div>
+        <div style="display:flex;gap:10px;margin-top:12px">
+          <input type="text" id="test-input" placeholder="输入自定义问题..." style="flex:1;padding:10px 14px;border:2px solid var(--paper-3);border-radius:10px;font-size:14px;outline:none;background:var(--paper)" onkeydown="if(event.key==='Enter')runCustomTest()" />
+          <button class="btn btn-violet" onclick="runCustomTest()">发送</button>
+        </div>
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">测试结果</span>
+        <button class="btn btn-ghost btn-sm" onclick="clearTestResults()">清空</button>
+      </div>
+      <div class="card" id="test-results" style="max-height:480px;overflow-y:auto">
+        <div style="padding:32px;text-align:center;color:var(--ink-4);font-size:13px">点击场景按钮开始测试...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     PANEL: 知识库
+═══════════════════════════════════════════════ -->
+<div id="panel-knowledge" class="panel">
+  <div class="content">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">文档列表</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="loadDocs()"><span class="spinner"></span> 刷新</button>
+          <button class="btn btn-violet btn-sm" onclick="openCreateDoc()">+ 新建文档</button>
+        </div>
+      </div>
+      <div class="card" style="padding:0;overflow:hidden">
+        <div style="display:flex;gap:20px;padding:14px 20px;background:var(--paper);border-bottom:1px solid var(--paper-2);font-size:12px;color:var(--ink-3);font-weight:600">
+          <span>总计: <strong id="doc-total">-</strong></span>
+          <span style="color:var(--emerald)">成功: <strong id="doc-done">-</strong></span>
+          <span style="color:var(--rose)">失败: <strong id="doc-failed">-</strong></span>
+          <span style="color:var(--amber)">处理中: <strong id="doc-pending">-</strong></span>
+        </div>
+        <div style="overflow-x:auto">
+          <table class="file-table">
+            <thead>
+              <tr>
+                <th>ID</th><th>标题</th><th>类型</th><th>分块</th><th>状态</th><th>创建时间</th><th>操作</th>
+              </tr>
+            </thead>
+            <tbody id="doc-tbody">
+              <tr><td colspan="7" style="text-align:center;padding:32px;color:var(--ink-4)">加载中...</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     PANEL: 增量摄取 ★
+═══════════════════════════════════════════════ -->
+<div id="panel-ingest" class="panel">
+  <div class="content">
+
+    <!-- 统计卡片 -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">摄取结果</span>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-ghost btn-sm" onclick="runIncremental(true)" id="btn-dry">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+            预览模式
+          </button>
+          <button class="btn btn-emerald btn-sm" onclick="runIncremental(false)" id="btn-run">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5,3 19,12 5,21 5,3"/></svg>
+            执行增量摄取
+          </button>
+        </div>
+      </div>
+      <div class="stats-row" id="ingest-stats">
+        <div class="stat-block">
+          <div class="stat-num added"   id="stat-added">0</div>
+          <div class="stat-label">新增</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-num updated" id="stat-updated">0</div>
+          <div class="stat-label">更新</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-num unchanged" id="stat-unchanged">0</div>
+          <div class="stat-label">无变化</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-num deleted" id="stat-deleted">0</div>
+          <div class="stat-label">删除</div>
+        </div>
+        <div class="stat-block">
+          <div class="stat-num errors" id="stat-errors">0</div>
+          <div class="stat-label">错误</div>
+        </div>
+      </div>
+
+      <!-- 控制选项 -->
+      <div class="card">
+        <div class="toggle-row">
+          <label class="toggle-label">
+            <div class="toggle">
+              <input type="checkbox" id="tog-dry" checked />
+              <div class="toggle-slider"></div>
+            </div>
+            <div>
+              <span>Dry Run 预览模式</span>
+              <small>· 仅扫描不实际写入，查看变更清单</small>
+            </div>
+          </label>
+          <label class="toggle-label">
+            <div class="toggle">
+              <input type="checkbox" id="tog-delete" checked />
+              <div class="toggle-slider"></div>
+            </div>
+            <div>
+              <span>自动删除缺失文件</span>
+              <small>· data/ 中消失的文件自动软删除</small>
+            </div>
+          </label>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding-top:14px">
+          <button class="btn btn-violet" onclick="runIngestFromPanel()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16,16 12,12 8,16"/><line x1="12" y1="12" x2="12" y2="21"/><path d="M20.39 18.39A5 5 0 0018 9h-1.26A8 8 0 103 16.3"/></svg>
+            立即执行
+          </button>
+          <button class="btn btn-ghost" onclick="loadIngestDetails()">
+            <span class="spinner"></span> 刷新
+          </button>
+          <span id="ingest-status" style="font-size:12px;color:var(--ink-4)"></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- 详细变更清单 -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">变更清单</span>
+        <span id="detail-count" style="font-size:12px;color:var(--ink-4)"></span>
+      </div>
+      <div class="card">
+        <div id="detail-list" class="detail-list">
+          <div style="padding:24px;text-align:center;color:var(--ink-4);font-size:13px">
+            点击「立即执行」查看变更清单，或先预览数据目录
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 数据目录扫描 -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">数据目录预览</span>
+        <button class="btn btn-ghost btn-sm" onclick="scanDataDir()">
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 19a2 2 0 01-2 2H4a2 2 0 01-2-2V5a2 2 0 012-2h5l2 3h9a2 2 0 012 2z"/></svg>
+          扫描目录
+        </button>
+      </div>
+      <div class="card">
+        <div id="file-scan-area">
+          <div style="padding:20px;text-align:center;color:var(--ink-4);font-size:13px">
+            点击「扫描目录」预览 data/ 目录中的文件
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Celery Beat 调度状态 -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">Celery Beat 定时任务</span>
+        <button class="btn btn-ghost btn-sm" onclick="loadBeatSchedule()">
+          <span class="spinner"></span> 刷新
+        </button>
+      </div>
+      <div class="card">
+        <div id="beat-area" class="beat-grid">
+          <div style="padding:20px;text-align:center;color:var(--ink-4);font-size:13px;grid-column:1/-1">加载中...</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 操作日志 -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">操作日志</span>
+        <button class="btn btn-ghost btn-sm" onclick="clearIngestLog()">清空</button>
+      </div>
+      <div class="card">
+        <div id="ingest-log" class="log-area">[等待操作...]</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     PANEL: 检索调试 ★
+═══════════════════════════════════════════════ -->
+<div id="panel-retrieve" class="panel">
+  <div class="content">
+    <!-- 参数控制区 -->
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">参数控制</span>
+      </div>
+      <div class="card">
+        <!-- 查询输入 -->
+        <div style="margin-bottom:14px">
+          <input type="text" id="ret-query" placeholder="输入查询词..." style="width:100%;padding:10px 14px;border:2px solid var(--paper-3);border-radius:10px;font-size:14px;outline:none;box-sizing:border-box" onkeydown="if(event.key==='Enter')runRetrieve()" />
+        </div>
+        <!-- 参数行 -->
+        <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+          <!-- top_k 滑块 -->
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:12px;font-weight:600;color:var(--ink-3)">Top-K</span>
+            <input type="range" id="ret-topk" min="5" max="50" value="10" style="width:80px" oninput="document.getElementById('ret-topk-val').textContent=this.value" />
+            <span id="ret-topk-val" style="font-size:12px;min-width:24px">10</span>
+          </div>
+          <!-- rerank_top_k 滑块 -->
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:12px;font-weight:600;color:var(--ink-3)">Rerank</span>
+            <input type="range" id="ret-rerankk" min="3" max="20" value="5" style="width:80px" oninput="document.getElementById('ret-rerankk-val').textContent=this.value" />
+            <span id="ret-rerankk-val" style="font-size:12px;min-width:24px">5</span>
+          </div>
+          <!-- bm25_weight 滑块 -->
+          <div style="display:flex;align-items:center;gap:8px">
+            <span style="font-size:12px;font-weight:600;color:var(--ink-3)">BM25</span>
+            <input type="range" id="ret-bm25w" min="0" max="100" value="30" style="width:80px" oninput="document.getElementById('ret-bm25w-val').textContent=(this.value/100).toFixed(2)" />
+            <span id="ret-bm25w-val" style="font-size:12px;min-width:36px">0.30</span>
+          </div>
+          <!-- lang_filter -->
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:12px;font-weight:600;color:var(--ink-3)">语言:</span>
+            <label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" id="ret-lang-zh" value="zh" />中文</label>
+            <label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" id="ret-lang-en" value="en" />英文</label>
+            <label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" id="ret-lang-vi" value="vi" />越南</label>
+          </div>
+        </div>
+        <!-- 开关行 -->
+        <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+          <label class="toggle-label">
+            <div class="toggle">
+              <input type="checkbox" id="ret-hybrid" checked />
+              <div class="toggle-slider"></div>
+            </div>
+            <div><span>Hybrid 混合检索</span><small> · Dense+BM25</small></div>
+          </label>
+          <label class="toggle-label">
+            <div class="toggle">
+              <input type="checkbox" id="ret-llm-rerank" />
+              <div class="toggle-slider"></div>
+            </div>
+            <div><span>LLM 重排</span><small> · 规则+LLM混合</small></div>
+          </label>
+          <label class="toggle-label">
+            <div class="toggle">
+              <input type="checkbox" id="ret-runllm" />
+              <div class="toggle-slider"></div>
+            </div>
+            <div><span>执行 LLM 生成</span><small> · 完整 RAG</small></div>
+          </label>
+          <div style="flex:1"></div>
+          <button class="btn btn-violet" onclick="runRetrieve()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5,3 19,12 5,21 5,3"/></svg>
+            执行
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 阶段时间线 -->
+    <div id="ret-timeline" class="section">
+      <div style="text-align:center;color:var(--ink-4);font-size:13px;padding:40px 0">
+        输入查询词后点击「执行」查看各阶段结果
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ── Helpers ────────────────────────────────────────────────────────
+let toastTimer = null;
+function showToast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'toast show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = 'toast'; }, 3500);
+}
+
+async function apiGet(url) {
+  try {
+    const r = await fetch(url);
+    const text = await r.text();
+    if (!r.ok) return { ok: false, status: r.status, msg: text.slice(0, 200) };
+    try { return { ok: true, data: JSON.parse(text) }; }
+    catch { return { ok: true, data: text }; }
+  } catch(e) { return { ok: false, status: 0, msg: e.message }; }
+}
+
+async function apiPost(url, body) {
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    });
+    const text = await r.text();
+    if (!r.ok) return { ok: false, status: r.status, msg: text.slice(0, 300) };
+    try { return { ok: true, data: JSON.parse(text) }; }
+    catch { return { ok: true, data: text }; }
+  } catch(e) { return { ok: false, status: 0, msg: e.message }; }
+}
+
+function ts() { return new Date().toLocaleTimeString('zh-CN', {hour:'2-digit',minute:'2-digit',second:'2-digit'}); }
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Tab nav ──────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.tab-btn[onclick="switchTab('${name}')"]`).classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+  if (name === 'monitor') loadMonitor();
+  else if (name === 'testing') { /* no init */ }
+  else if (name === 'knowledge') loadDocs();
+  else if (name === 'ingest') { loadIngestDetails(); loadBeatSchedule(); }
+  else if (name === 'retrieve') { /* auto-init, no action needed */ }
+}
+
+// ── Monitor ────────────────────────────────────────────────────────
+async function loadMonitor() {
+  document.getElementById('mon-last-updated').textContent = '更新于 ' + ts();
+  const [healthRes, alertsRes] = await Promise.all([
+    apiGet('/api/v1/health/detailed'),
+    apiGet('/api/v1/health/alerts'),
+  ]);
+
+  const comps = healthRes.ok ? (healthRes.data.components || {}) : {};
+  const alerts = alertsRes.ok ? (alertsRes.data.alerts || {}) : {};
+
+  document.getElementById('mon-sessions').textContent = '-';
+  document.getElementById('mon-llm-fail').textContent = alerts.llm?.consecutive_failures ?? 0;
+  document.getElementById('mon-latency').textContent = alerts.latency?.p99_ms ? Math.round(alerts.latency.p99_ms) : '-';
+
+  const compNames = ['mysql','redis','milvus','llm'];
+  document.getElementById('comp-list').innerHTML = compNames.map(k => {
+    const c = comps[k] || {};
+    const dot = c.status === 'up' ? 'var(--emerald)' : c.status === 'down' ? 'var(--rose)' : 'var(--amber)';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:12px 0;border-bottom:1px solid var(--paper-2)">
+      <span style="font-weight:700;font-size:13px">${k.toUpperCase()}</span>
+      <span style="display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-3)">
+        <span style="width:10px;height:10px;border-radius:50%;background:${dot};box-shadow:0 0 0 3px ${dot.replace('var(','rgba(').replace(')',',0.2)')}"></span>
+        ${c.status || 'unknown'}${c.latency_ms != null ? ' · '+c.latency_ms+'ms' : ''}
+      </span>
+    </div>`;
+  }).join('');
+  document.getElementById('comp-list').innerHTML += `<div style="padding-top:8px;font-size:11px;color:var(--ink-4)">最后更新: ${ts()}</div>`;
+}
+
+// ── Testing ──────────────────────────────────────────────────────
+const scenarios = {
+  product: ['这件T恤有哪些颜色可选？','iPhone 15 续航多久？','推荐一款跑鞋'],
+  order: ['订单号20260301001到哪了？','帮我查下最近订单','能修改收货地址吗'],
+  refund: ['收到质量问题怎么退货？','七天无理由要运费吗？','退款多久到账？'],
+  general: ['支持哪些支付方式？','几天能收到货？','如何成为会员？'],
+  multi: ['有蓝牙耳机吗？','那款降噪效果如何？','保修多久？'],
+};
+let testRunning = false;
+let testSession = null;
+
+async function runTest(type) {
+  if (testRunning) { showToast('测试进行中...', 'warning'); return; }
+  testRunning = true;
+  const msgs = scenarios[type] || [];
+  for (const m of msgs) {
+    await runSingleTest(m, type);
+    await new Promise(r => setTimeout(r, 400));
+  }
+  testRunning = false;
+  showToast(`「${type}」完成，共 ${msgs.length} 条`, 'success');
+}
+
+async function runCustomTest() {
+  const el = document.getElementById('test-input');
+  const msg = el.value.trim();
+  if (!msg) return;
+  el.value = '';
+  await runSingleTest(msg, 'custom');
+}
+
+async function runSingleTest(message, type) {
+  const container = document.getElementById('test-results');
+  if (container.querySelector('div[style*="text-align:center"]')) container.innerHTML = '';
+
+  const start = Date.now();
+  container.insertAdjacentHTML('afterbegin',
+    `<div style="margin-bottom:12px">
+      <div style="background:var(--violet);color:white;padding:8px 14px;border-radius:10px 10px 4px 10px;font-size:14px;margin-bottom:6px">${escHtml(message)}</div>
+      <div id="placeholder-${Date.now()}" style="padding:8px 14px;color:var(--ink-4);font-size:13px">等待响应...</div>
+    </div>`
+  );
+  const ph = container.querySelector(`[id^="placeholder-"]`);
+
+  try {
+    const res = await fetch('/api/v1/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message, user_id: 'test-user', session_id: testSession })
+    });
+    const data = await res.json();
+    testSession = data.session_id;
+    const elapsed = Date.now() - start;
+    ph.outerHTML = `<div style="background:var(--paper);border:1px solid var(--paper-2);border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.6;color:var(--ink)">
+      ${escHtml(data.message || '（无响应）')}
+      <div style="margin-top:8px;font-size:11px;color:var(--ink-4);display:flex;gap:16px;flex-wrap:wrap">
+        <span>耗时: ${elapsed}ms</span>
+        <span>Tokens: ${data.tokens_used || 0}</span>
+        ${data.intent ? `<span>意图: <strong>${data.intent}</strong></span>` : ''}
+        ${data.sources?.length ? `<span>来源: ${data.sources.join(', ')}</span>` : ''}
+      </div>
+    </div>`;
+  } catch(e) {
+    ph.outerHTML = `<div style="padding:12px 14px;color:var(--rose);font-size:13px">错误: ${e.message}</div>`;
+  }
+}
+
+function clearTestResults() {
+  document.getElementById('test-results').innerHTML = '<div style="padding:32px;text-align:center;color:var(--ink-4);font-size:13px">记录已清空</div>';
+  testSession = null;
+}
+
+// ── Knowledge Base ────────────────────────────────────────────────
+async function loadDocs() {
+  const res = await apiGet('/api/v1/admin/documents');
+  const tbody = document.getElementById('doc-tbody');
+  if (!res.ok) { tbody.innerHTML = `<tr><td colspan="7" style="color:var(--rose);padding:24px">加载失败: ${res.msg}</td></tr>`; return; }
+  const d = res.data;
+  document.getElementById('doc-total').textContent = d.total || 0;
+  document.getElementById('doc-done').textContent = d.done || 0;
+  document.getElementById('doc-failed').textContent = d.failed || 0;
+  document.getElementById('doc-pending').textContent = d.pending || 0;
+  document.getElementById('mon-docs').textContent = d.done || 0;
+  const docs = d.documents || [];
+  if (!docs.length) { tbody.innerHTML = '<tr><td colspan="7" style="text-align:center;padding:32px;color:var(--ink-4)">暂无文档</td></tr>'; return; }
+  tbody.innerHTML = docs.map(doc => `
+    <tr>
+      <td>${doc.id}</td>
+      <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(doc.title || '-')}</td>
+      <td><span class="mono">${doc.doc_type || '-'}</span></td>
+      <td>${doc.chunk_count ?? '-'}</td>
+      <td><span class="pill pill-${doc.status === 'done' ? 'done' : doc.status === 'failed' ? 'failed' : 'pending'}">${doc.status}</span></td>
+      <td style="font-size:12px;white-space:nowrap">${doc.created_at ? new Date(doc.created_at).toLocaleString('zh-CN',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '-'}</td>
+      <td><div style="display:flex;gap:6px">
+        <button class="btn btn-ghost btn-sm" onclick="reindexDoc(${doc.id})">重建</button>
+        <button class="btn btn-ghost btn-sm" onclick="deleteDoc(${doc.id})">删除</button>
+      </div></td>
+    </tr>`).join('');
+}
+
+async function reindexDoc(id) {
+  const res = await apiPost(`/api/v1/admin/documents/${id}/reindex`, {});
+  showToast(res.ok ? `文档 #${id} 重建完成` : '重建失败', res.ok ? 'success' : 'error');
+  loadDocs();
+}
+
+async function deleteDoc(id) {
+  if (!confirm(`确定删除文档 #${id}？`)) return;
+  const res = await apiPost(`/api/v1/admin/documents/${id}`, { _method: 'DELETE' });
+  showToast(res.ok ? '删除成功' : '删除失败', res.ok ? 'success' : 'error');
+  loadDocs();
+}
+
+function openCreateDoc() {
+  const title = prompt('文档标题:');
+  if (!title) return;
+  const type = prompt('类型 (product/policy/faq/manual):', 'product');
+  if (!type) return;
+  const content = prompt('JSON 内容:', '{"title":"' + title + '","content":"内容..."}');
+  if (!content) return;
+  try { JSON.parse(content); } catch { showToast('JSON 格式错误', 'error'); return; }
+  apiPost('/api/v1/admin/documents', { title, doc_type: type, content: JSON.parse(content), source: 'manual' })
+    .then(r => { showToast(r.ok ? '创建成功' : '创建失败', r.ok ? 'success' : 'error'); loadDocs(); });
+}
+
+// ── ══ 增量摄取 ★ ══ ─────────────────────────────────────────────
+
+let ingestRunning = false;
+
+async function runIngestFromPanel() {
+  if (ingestRunning) { showToast('摄取进行中...', 'warning'); return; }
+  const dryRun = document.getElementById('tog-dry').checked;
+  const deleteMissing = document.getElementById('tog-delete').checked;
+  await runIncremental(dryRun, deleteMissing);
+}
+
+async function runIncremental(dryRun = true, deleteMissing = true) {
+  if (ingestRunning) { showToast('摄取进行中，请稍候...', 'warning'); return; }
+  ingestRunning = true;
+  const statusEl = document.getElementById('ingest-status');
+  statusEl.textContent = dryRun ? '执行 Dry Run...' : '执行增量摄取...';
+  document.getElementById('ingest-log').innerHTML =
+    `<span class="log-ts">[${ts()}]</span><span class="log-info">开始${dryRun ? 'Dry Run' : '增量摄取'} | delete_missing=${deleteMissing}</span>\n`;
+
+  try {
+    const res = await fetch(`/api/v1/admin/ingest/incremental?dry_run=${dryRun}&delete_missing=${deleteMissing}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      const s = data.summary || {};
+      document.getElementById('stat-added').textContent = s.added ?? 0;
+      document.getElementById('stat-updated').textContent = s.updated ?? 0;
+      document.getElementById('stat-unchanged').textContent = s.unchanged ?? 0;
+      document.getElementById('stat-deleted').textContent = s.deleted ?? 0;
+      document.getElementById('stat-errors').textContent = s.errors ?? 0;
+      document.getElementById('detail-count').textContent = `${(data.details || []).length} 条记录`;
+
+      const details = data.details || [];
+      if (details.length) {
+        document.getElementById('detail-list').innerHTML = details.map(d => {
+          const action = d.action || 'unknown';
+          const meta = [d.chunks ? d.chunks + ' chunks' : '', d.title ? escHtml(d.title.slice(0,40)) : ''].filter(Boolean).join(' · ');
+          return `<div class="detail-item">
+            <span class="action-tag ${action}">${action}</span>
+            <span class="detail-path">${escHtml(d.source_path || '')}</span>
+            ${meta ? `<span class="detail-meta">${meta}</span>` : ''}
+          </div>`;
+        }).join('');
+      } else {
+        document.getElementById('detail-list').innerHTML = `<div style="padding:24px;text-align:center;color:var(--ink-4);font-size:13px">无变更内容（目录为空或已同步）</div>`;
+      }
+
+      const logEl = document.getElementById('ingest-log');
+      const modeName = dryRun ? 'Dry Run' : '增量摄取';
+      const logLines = [
+        '<span class="log-ts">[' + ts() + ']</span><span class="log-ok">&#10003; ' + modeName + ' 完成</span>',
+        '<span class="log-ts">[' + ts() + ']</span><span>新增: ' + (s.added||0) + ' | 更新: ' + (s.updated||0) + ' | 无变化: ' + (s.unchanged||0) + ' | 删除: ' + (s.deleted||0) + ' | 错误: ' + (s.errors||0) + '</span>',
+      ];
+      logEl.innerHTML = logLines.join('\n') + '\n' + logEl.innerHTML;
+
+      showToast(modeName + ' 完成 - 新增' + (s.added||0) + ' 更新' + (s.updated||0), 'success');
+    } else {
+      log(`<span class="log-err">✗ 失败: ${JSON.stringify(data).slice(0,200)}</span>`, 'error');
+      showToast('增量摄取失败', 'error');
+    }
+  } catch(e) {
+    log(`<span class="log-err">✗ 网络错误: ${e.message}</span>`, 'error');
+    showToast('网络错误', 'error');
+  } finally {
+    ingestRunning = false;
+    statusEl.textContent = '';
+  }
+}
+
+function loadIngestDetails() {
+  // 加载最近的 details（如果有缓存的话，否则显示空状态）
+  const detailList = document.getElementById('detail-list');
+  if (detailList.querySelector('.detail-item')) return;
+  detailList.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-4);font-size:13px">点击「立即执行」获取变更清单</div>';
+}
+
+async function scanDataDir() {
+  const area = document.getElementById('file-scan-area');
+  area.innerHTML = `<div style="padding:20px;text-align:center;color:var(--ink-4)"><span class="spinner" style="display:inline-block;width:16px;height:16px;border:2px solid var(--paper-3);border-top-color:var(--violet);border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle"></span> 扫描中...</div>`;
+
+  // 通过 ingest API 的 dry_run=true 来获取目录扫描结果
+  try {
+    const res = await fetch('/api/v1/admin/ingest/incremental?dry_run=true&delete_missing=false', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' }
+    });
+    const data = await res.json();
+
+    if (res.ok) {
+      const details = data.details || [];
+      if (details.length) {
+        area.innerHTML = `<table class="file-table">
+          <thead><tr><th>操作</th><th>来源路径</th><th>标题</th><th>Chunks</th></tr></thead>
+          <tbody>
+            ${details.map(d => `<tr>
+              <td><span class="action-tag ${d.action || 'unknown'}">${d.action || '?'}</span></td>
+              <td class="mono">${escHtml(d.source_path || '')}</td>
+              <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${escHtml(d.title || '-')}</td>
+              <td>${d.chunks ?? '-'}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>`;
+      } else {
+        area.innerHTML = `<div style="padding:24px;text-align:center;color:var(--ink-4);font-size:13px">
+          data/ 目录中没有找到 JSON 文件（仅支持 products.json / knowledge_base.json / orders.json）<br>
+          <small>富文本文件 (.pdf/.docx/.html) 暂不在预览列表中</small>
+        </div>`;
+      }
+    } else {
+      area.innerHTML = `<div style="padding:24px;color:var(--rose);font-size:13px">扫描失败: ${JSON.stringify(data).slice(0,200)}</div>`;
+    }
+  } catch(e) {
+    area.innerHTML = `<div style="padding:24px;color:var(--rose);font-size:13px">错误: ${e.message}</div>`;
+  }
+}
+
+async function loadBeatSchedule() {
+  const area = document.getElementById('beat-area');
+  area.innerHTML = `<div style="padding:20px;text-align:center;color:var(--ink-4);font-size:13px;grid-column:1/-1">加载中...</div>`;
+
+  // 通过 celery inspect 获取调度信息（需要后端支持 /api/v1/admin/beat 端点）
+  // 暂时展示已知的调度任务
+  const knownTasks = [
+    { name: 'daily-incremental-ingest', schedule: '0 0 * * * (每日 00:00)', task: 'celery_app.tasks.incremental_ingest.daily_incremental_ingest' },
+    { name: 'refresh-hot-questions',  schedule: '每 1 小时',          task: 'celery_app.tasks.refresh_hot_questions' },
+    { name: 'cleanup-old-logs',       schedule: '每 24 小时',          task: 'celery_app.tasks.cleanup_old_logs' },
+  ];
+
+  area.innerHTML = knownTasks.map(t => `
+    <div class="beat-card">
+      <div class="beat-name">
+        <span style="width:8px;height:8px;border-radius:50%;background:var(--emerald);flex-shrink:0"></span>
+        ${escHtml(t.name)}
+      </div>
+      <div class="beat-schedule">${escHtml(t.schedule)}</div>
+      <div class="beat-task">${escHtml(t.task)}</div>
+    </div>`).join('');
+}
+
+function log(html, type) {
+  const el = document.getElementById('ingest-log');
+  el.innerHTML = `<span class="log-ts">[${ts()}]</span>${html}\n` + el.innerHTML;
+  if (el.innerHTML.length > 50000) el.innerHTML = el.innerHTML.slice(0, 50000);
+}
+
+function clearIngestLog() {
+  document.getElementById('ingest-log').innerHTML = '[日志已清空]';
+}
+
+// ── Init ──────────────────────────────────────────────────────────
+loadMonitor();
+
+// ── ══ 检索调试 ★ ══ ─────────────────────────────────────────────
+
+async function runRetrieve() {
+  const query = document.getElementById('ret-query').value.trim();
+  if (!query) { showToast('请输入查询词', 'warning'); return; }
+  const params = {
+    query,
+    top_k: parseInt(document.getElementById('ret-topk').value),
+    rerank_top_k: parseInt(document.getElementById('ret-rerankk').value),
+    hybrid_search: document.getElementById('ret-hybrid').checked,
+    bm25_weight: parseFloat(document.getElementById('ret-bm25w').value) / 100,
+    use_llm_rerank: document.getElementById('ret-llm-rerank').checked,
+    lang_filter: ['zh','en','vi'].filter(l => document.getElementById('ret-lang-' + l).checked),
+    section_type_filter: [],
+    run_llm: document.getElementById('ret-runllm').checked,
+    intent: 'product_qa'
+  };
+
+  const timeline = document.getElementById('ret-timeline');
+  timeline.innerHTML = `<div style="text-align:center;padding:40px 0;color:var(--violet);font-size:13px">
+    <span class="spinner" style="display:inline-block;width:20px;height:20px;border:2px solid var(--paper-3);border-top-color:var(--violet);border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:8px"></span>
+    执行中... (${params.top_k} docs)
+  </div>`;
+
+  const res = await apiPost('/api/v1/debug/retrieve', params);
+  if (!res.ok) {
+    timeline.innerHTML = `<div style="padding:24px;text-align:center;color:var(--rose);font-size:13px">调用失败: ${escHtml(res.msg)}</div>`;
+    showToast('API 调用失败', 'error');
+    return;
+  }
+
+  const data = res.data;
+  const stages = data.stages || {};
+
+  // 生成阶段卡片
+  const stageOrder = ['dense'];
+  if (params.hybrid_search) stageOrder.push('bm25', 'rrf');
+  stageOrder.push('rerank');
+  if (params.run_llm && stages.llm) stageOrder.push('llm');
+
+  let html = '';
+
+  // Dense 卡片
+  if (stages.dense) {
+    html += renderStageCard(
+      'Dense 向量召回',
+      stages.dense.count || 0,
+      stages.dense.duration_ms || 0,
+      renderDenseTable(stages.dense.items || []),
+      'dense',
+      'var(--violet)'
+    );
+  }
+
+  // BM25 卡片（仅 hybrid=true）
+  if (stages.bm25) {
+    html += renderStageCard(
+      'BM25 关键词召回',
+      stages.bm25.count || 0,
+      stages.bm25.duration_ms || 0,
+      renderBm25Table(stages.bm25.items || []),
+      'bm25',
+      'var(--emerald)'
+    );
+  }
+
+  // RRF 卡片（仅 hybrid=true）
+  if (stages.rrf) {
+    html += renderStageCard(
+      'RRF 融合排序',
+      stages.rrf.count || 0,
+      stages.rrf.duration_ms || 0,
+      renderRrfTable(stages.rrf.items || []),
+      'rrf',
+      'var(--amber)'
+    );
+  }
+
+  // Rerank 卡片
+  if (stages.rerank) {
+    html += renderStageCard(
+      'MMR 重排 · ' + (stages.rerank.method === 'rule+llm' ? '规则+LLM' : '规则'),
+      stages.rerank.count || 0,
+      stages.rerank.duration_ms || 0,
+      renderRerankTable(stages.rerank.items || []),
+      'rerank',
+      'var(--rose)'
+    );
+  }
+
+  // LLM 卡片（仅 run_llm=true）
+  if (stages.llm) {
+    html += renderLlmCard(stages.llm);
+  }
+
+  // 总耗时
+  const totalMs = data.total_latency_ms || 0;
+  html += `<div class="total-latency">总耗时: ${totalMs} ms</div>`;
+
+  timeline.innerHTML = html;
+}
+
+function renderStageCard(title, count, duration, contentHtml, stageId, color) {
+  return `<div class="stage-card" id="stage-${stageId}">
+    <div class="stage-header" onclick="this.closest('.stage-card').classList.toggle('open')">
+      <svg class="stage-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9,18 15,12 9,6"/></svg>
+      <span class="stage-title" style="display:flex;align-items:center;gap:8px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
+        ${escHtml(title)}
+      </span>
+      <span class="stage-badge">
+        <span class="count">${count}</span>
+        <span class="time">${duration}ms</span>
+      </span>
+    </div>
+    <div class="stage-content">${contentHtml}</div>
+  </div>`;
+}
+
+function renderDenseTable(items) {
+  if (!items.length) return '<div style="padding:16px;text-align:center;color:var(--ink-4);font-size:13px">无结果</div>';
+  return `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="background:var(--paper-2)">
+          <th style="padding:8px 18px;text-align:left;font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:0.05em;border-radius:8px 8px 0 0">Content</th>
+          <th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--ink-3);min-width:90px">Score</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map((item, i) => `
+        <tr class="doc-row" id="dense-row-${i}">
+          <td style="padding:10px 18px;vertical-align:top">
+            <div class="doc-row-header" style="grid-template-columns:1fr auto" onclick="toggleDocRow('dense-row-${i}')">
+              <div>
+                <div style="font-size:13px;line-height:1.4;color:var(--ink);margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(item.content || '')}</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">
+                  ${item.section_type ? `<span class="meta-tag section">${escHtml(item.section_type)}</span>` : ''}
+                  ${(item.markets || []).slice(0,3).map(m => `<span class="meta-tag market">${escHtml(m)}</span>`).join('')}
+                  ${item.lang ? `<span class="meta-tag lang">${escHtml(item.lang)}</span>` : ''}
+                </div>
+              </div>
+              <div class="score-bar">
+                <div class="score-bar-fill" style="width:${Math.min(Math.max((item.dense_score||0)*50, 2), 80)}px;background:var(--violet)"></div>
+                <span>${(item.dense_score||0).toFixed(3)}</span>
+              </div>
+            </div>
+            <div class="doc-row-expand">
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">完整内容</div>
+              <div style="background:var(--paper);border-radius:8px;padding:12px;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto;margin-bottom:10px">${escHtml(item.content || '')}</div>
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">Metadata</div>
+              <pre style="background:var(--ink);color:#a8b3cf;font-family:'Courier New',monospace;font-size:11px;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto">${escHtml(JSON.stringify({section_type:item.section_type,markets:item.markets,lang:item.lang,hierarchy:item.hierarchy,source:item.source,dense_score:item.dense_score}, null, 2))}</pre>
+            </div>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function renderBm25Table(items) {
+  if (!items.length) return '<div style="padding:16px;text-align:center;color:var(--ink-4);font-size:13px">无结果</div>';
+  return `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="background:var(--paper-2)">
+          <th style="padding:8px 18px;text-align:left;font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:0.05em;border-radius:8px 8px 0 0">Content</th>
+          <th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--ink-3);min-width:140px">Raw / Norm</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map((item, i) => `
+        <tr class="doc-row" id="bm25-row-${i}">
+          <td style="padding:10px 18px;vertical-align:top">
+            <div class="doc-row-header" style="grid-template-columns:1fr auto" onclick="toggleDocRow('bm25-row-${i}')">
+              <div>
+                <div style="font-size:13px;line-height:1.4;color:var(--ink);margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(item.content || '')}</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">
+                  ${item.section_type ? `<span class="meta-tag section">${escHtml(item.section_type)}</span>` : ''}
+                  ${(item.markets || []).slice(0,3).map(m => `<span class="meta-tag market">${escHtml(m)}</span>`).join('')}
+                  ${item.lang ? `<span class="meta-tag lang">${escHtml(item.lang)}</span>` : ''}
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:11px;font-weight:600;white-space:nowrap">
+                <span style="color:var(--ink)">${(item.bm25_raw||0).toFixed(2)}</span>
+                <span style="color:var(--emerald)">${(item.bm25_norm||0).toFixed(3)}</span>
+              </div>
+            </div>
+            <div class="doc-row-expand">
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">完整内容</div>
+              <div style="background:var(--paper);border-radius:8px;padding:12px;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto;margin-bottom:10px">${escHtml(item.content || '')}</div>
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">Metadata</div>
+              <pre style="background:var(--ink);color:#a8b3cf;font-family:'Courier New',monospace;font-size:11px;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto">${escHtml(JSON.stringify({bm25_raw:item.bm25_raw,bm25_norm:item.bm25_norm,section_type:item.section_type,markets:item.markets,lang:item.lang,source:item.source}, null, 2))}</pre>
+            </div>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function renderRrfTable(items) {
+  if (!items.length) return '<div style="padding:16px;text-align:center;color:var(--ink-4);font-size:13px">无结果</div>';
+  return `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="background:var(--paper-2)">
+          <th style="padding:8px 18px;text-align:left;font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:0.05em;border-radius:8px 8px 0 0">Content</th>
+          <th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--ink-3);min-width:120px">Score / Ranks</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map((item, i) => `
+        <tr class="doc-row" id="rrf-row-${i}">
+          <td style="padding:10px 18px;vertical-align:top">
+            <div class="doc-row-header" style="grid-template-columns:1fr auto" onclick="toggleDocRow('rrf-row-${i}')">
+              <div>
+                <div style="font-size:13px;line-height:1.4;color:var(--ink);margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(item.content || '')}</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">
+                  ${item.section_type ? `<span class="meta-tag section">${escHtml(item.section_type)}</span>` : ''}
+                  ${(item.markets || []).slice(0,3).map(m => `<span class="meta-tag market">${escHtml(m)}</span>`).join('')}
+                  ${item.lang ? `<span class="meta-tag lang">${escHtml(item.lang)}</span>` : ''}
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:11px;font-weight:600;white-space:nowrap">
+                <span style="color:var(--amber)">${(item.rrf_score||0).toFixed(3)}</span>
+                <span style="color:var(--ink-3);font-size:10px">D:<span style="color:var(--violet)">#${item.dense_rank||'?'}</span> B:<span style="color:var(--emerald)">#${item.bm25_rank||'?'}</span></span>
+              </div>
+            </div>
+            <div class="doc-row-expand">
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">完整内容</div>
+              <div style="background:var(--paper);border-radius:8px;padding:12px;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto;margin-bottom:10px">${escHtml(item.content || '')}</div>
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">Metadata</div>
+              <pre style="background:var(--ink);color:#a8b3cf;font-family:'Courier New',monospace;font-size:11px;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all">${escHtml(JSON.stringify({rrf_score:item.rrf_score,dense_rank:item.dense_rank,bm25_rank:item.bm25_rank,section_type:item.section_type,markets:item.markets,lang:item.lang,source:item.source}, null, 2))}</pre>
+            </div>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function renderRerankTable(items) {
+  if (!items.length) return '<div style="padding:16px;text-align:center;color:var(--ink-4);font-size:13px">无结果</div>';
+  return `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="background:var(--paper-2)">
+          <th style="padding:8px 18px;text-align:left;font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:0.05em;border-radius:8px 8px 0 0">Content</th>
+          <th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--ink-3);min-width:100px">Score</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map((item, i) => `
+        <tr class="doc-row" id="rerank-row-${i}">
+          <td style="padding:10px 18px;vertical-align:top">
+            <div class="doc-row-header" style="grid-template-columns:1fr auto" onclick="toggleDocRow('rerank-row-${i}')">
+              <div>
+                <div style="font-size:13px;line-height:1.4;color:var(--ink);margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(item.content || '')}</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">
+                  ${item.section_type ? `<span class="meta-tag section">${escHtml(item.section_type)}</span>` : ''}
+                  ${(item.markets || []).slice(0,3).map(m => `<span class="meta-tag market">${escHtml(m)}</span>`).join('')}
+                  ${item.lang ? `<span class="meta-tag lang">${escHtml(item.lang)}</span>` : ''}
+                  ${item.mmr_reason ? `<span class="meta-tag reason">${escHtml(item.mmr_reason)}</span>` : ''}
+                </div>
+              </div>
+              <div class="score-bar">
+                <div class="score-bar-fill" style="width:${Math.min(Math.max((item.rerank_score||0)*80, 2), 80)}px;background:var(--rose)"></div>
+                <span style="color:var(--rose)">${(item.rerank_score||0).toFixed(3)}</span>
+              </div>
+            </div>
+            <div class="doc-row-expand">
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">完整内容</div>
+              <div style="background:var(--paper);border-radius:8px;padding:12px;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto;margin-bottom:10px">${escHtml(item.content || '')}</div>
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">Metadata</div>
+              <pre style="background:var(--ink);color:#a8b3cf;font-family:'Courier New',monospace;font-size:11px;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all">${escHtml(JSON.stringify({rerank_score:item.rerank_score,mmr_reason:item.mmr_reason,section_type:item.section_type,markets:item.markets,lang:item.lang,source:item.source}, null, 2))}</pre>
+            </div>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function renderLlmCard(llm) {
+  const promptPreview = escHtml(llm.prompt_preview || llm.message || '');
+  const response = escHtml(llm.message || '');
+  const intent = llm.intent || '';
+  const tokens = llm.tokens_used || 0;
+  const latency = llm.latency_ms || 0;
+
+  return `<div class="stage-card" id="stage-llm">
+    <div class="stage-header" onclick="this.closest('.stage-card').classList.toggle('open')">
+      <svg class="stage-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9,18 15,12 9,6"/></svg>
+      <span class="stage-title" style="display:flex;align-items:center;gap:8px">
+        <span style="width:10px;height:10px;border-radius:50%;background:var(--slate);flex-shrink:0"></span>
+        LLM 生成
+      </span>
+      <span class="stage-badge">
+        <span class="time">${latency}ms</span>
+      </span>
+    </div>
+    <div class="stage-content">
+      ${promptPreview ? `<div style="padding:14px 18px 0">
+        <div style="font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Prompt Preview</div>
+        <div class="llm-prompt">${promptPreview.length > 2000 ? escHtml(promptPreview.slice(0,2000)) + '\n\n... (truncated)' : promptPreview}</div>
+      </div>` : ''}
+      <div style="padding:14px 18px">
+        ${response ? `<div class="llm-response">${response}</div>` : ''}
+        <div class="llm-meta-row">
+          <span>意图: <strong>${escHtml(intent)}</strong></span>
+          <span>Tokens: <strong>${tokens}</strong></span>
+          <span>耗时: <strong>${latency}ms</strong></span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function toggleDocRow(rowId) {
+  const row = document.getElementById(rowId);
+  if (row) row.classList.toggle('open');
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,1221 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>RAG 独立测试工具</title>
+<style>
+:root {
+  --ink: #1a1625;
+  --ink-2: #3d3852;
+  --ink-3: #7c7891;
+  --ink-4: #b0a9c0;
+  --paper: #f5f2ff;
+  --paper-2: #ece7f7;
+  --paper-3: #d8d0ed;
+  --violet: #6d28d9;
+  --violet-light: #ede9fe;
+  --emerald: #059669;
+  --emerald-light: #d1fae5;
+  --amber: #d97706;
+  --amber-light: #fef3c7;
+  --rose: #e11d48;
+  --rose-light: #ffe4e6;
+  --slate: #64748b;
+  --white: #ffffff;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html { scroll-behavior: smooth; }
+body {
+  font-family: 'Segoe UI', -apple-system, BlinkMacSystemFont, sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Top nav ────────────────────────────────────────────────────── */
+.topnav {
+  background: var(--ink);
+  color: white;
+  padding: 0 32px;
+  height: 56px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  box-shadow: 0 2px 12px rgba(26,22,37,0.3);
+}
+.topnav h1 { font-size: 16px; font-weight: 700; letter-spacing: -0.3px; }
+.topnav a { color: rgba(255,255,255,0.65); text-decoration: none; font-size: 13px; transition: color 0.2s; }
+.topnav a:hover { color: white; }
+
+/* ── Tab bar ───────────────────────────────────────────────────── */
+.tab-bar {
+  background: var(--white);
+  display: flex;
+  gap: 4px;
+  padding: 8px 32px 0;
+  border-bottom: 2px solid var(--paper-3);
+}
+.tab-btn {
+  padding: 10px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--ink-3);
+  border: none;
+  background: none;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+  margin-bottom: -2px;
+  border-radius: 8px 8px 0 0;
+  transition: all 0.2s;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.tab-btn:hover { color: var(--violet); background: var(--violet-light); }
+.tab-btn.active { color: var(--violet); border-bottom-color: var(--violet); background: var(--violet-light); }
+
+/* ── Content ───────────────────────────────────────────────────── */
+.content { max-width: 1280px; margin: 0 auto; padding: 28px 32px; }
+.panel { display: none; }
+.panel.active { display: block; }
+
+/* ── Card ─────────────────────────────────────────────────────── */
+.card {
+  background: var(--white);
+  border-radius: 16px;
+  box-shadow: 0 1px 4px rgba(26,22,37,0.06), 0 4px 16px rgba(26,22,37,0.04);
+  padding: 22px 24px;
+  margin-bottom: 16px;
+  border: 1px solid var(--paper-2);
+}
+.card:hover { box-shadow: 0 2px 8px rgba(26,22,37,0.08), 0 8px 24px rgba(26,22,37,0.06); }
+
+/* ── Pill tags ─────────────────────────────────────────────────── */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+}
+.pill-done   { background: var(--emerald-light); color: var(--emerald); }
+.pill-pending{ background: var(--amber-light);  color: var(--amber); }
+.pill-failed { background: var(--rose-light);   color: var(--rose); }
+.pill-info   { background: var(--violet-light); color: var(--violet); }
+
+/* ── Buttons ───────────────────────────────────────────────────── */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 9px 18px;
+  border: none;
+  border-radius: 10px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+  text-decoration: none;
+}
+.btn:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.btn:active { transform: translateY(0); }
+.btn:disabled { opacity: 0.55; cursor: not-allowed; transform: none; box-shadow: none; }
+.btn-violet  { background: var(--violet); color: white; }
+.btn-violet:hover { background: #5b21b6; }
+.btn-emerald { background: var(--emerald); color: white; }
+.btn-emerald:hover { background: #047857; }
+.btn-amber  { background: var(--amber); color: white; }
+.btn-amber:hover { background: #b45309; }
+.btn-ghost  { background: transparent; color: var(--ink-2); border: 1.5px solid var(--paper-3); }
+.btn-ghost:hover { background: var(--paper-2); }
+.btn-sm { padding: 5px 12px; font-size: 12px; }
+.btn .spinner {
+  display: inline-block; width: 14px; height: 14px;
+  border: 2px solid rgba(255,255,255,0.35);
+  border-top-color: white;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+}
+.btn-ghost .spinner { border-color: var(--paper-3); border-top-color: var(--ink-3); }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* ── Toggle ────────────────────────────────────────────────────── */
+.toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 24px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--paper-2);
+  flex-wrap: wrap;
+}
+.toggle-label { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.toggle-label span { font-size: 14px; font-weight: 600; color: var(--ink); }
+.toggle-label small { font-size: 12px; color: var(--ink-3); }
+.toggle {
+  position: relative; width: 44px; height: 24px; flex-shrink: 0;
+}
+.toggle input { opacity: 0; width: 0; height: 0; }
+.toggle-slider {
+  position: absolute; inset: 0;
+  background: var(--paper-3);
+  border-radius: 999px;
+  transition: background 0.25s;
+  cursor: pointer;
+}
+.toggle-slider::before {
+  content: ''; position: absolute;
+  left: 3px; top: 3px;
+  width: 18px; height: 18px;
+  background: white;
+  border-radius: 50%;
+  transition: transform 0.25s;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+}
+.toggle input:checked + .toggle-slider { background: var(--violet); }
+.toggle input:checked + .toggle-slider::before { transform: translateX(20px); }
+
+/* ── Log area ───────────────────────────────────────────────────── */
+.log-area {
+  background: #0f0e17;
+  color: #a8b3cf;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.7;
+  padding: 16px 18px;
+  border-radius: 10px;
+  max-height: 220px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+.log-ts { color: #4a5568; margin-right: 8px; }
+.log-ok  { color: #6ee7b7; }
+.log-warn { color: #fde68a; }
+.log-err  { color: #fca5a5; }
+.log-info { color: #93c5fd; }
+
+/* ── Toast ─────────────────────────────────────────────────────── */
+#toast {
+  position: fixed; bottom: 28px; right: 28px;
+  background: var(--ink); color: white;
+  padding: 12px 20px; border-radius: 12px;
+  font-size: 13px; font-weight: 600;
+  z-index: 1000; opacity: 0; transform: translateY(16px);
+  transition: all 0.3s; pointer-events: none;
+  max-width: 340px;
+}
+#toast.show { opacity: 1; transform: translateY(0); }
+#toast.success { background: var(--emerald); }
+#toast.error   { background: var(--rose); }
+#toast.warning { background: var(--amber); }
+
+/* ── Stage card (retrieve timeline) ─────────────────────────── */
+.stage-card {
+  background: var(--white);
+  border-radius: 14px;
+  border: 1px solid var(--paper-2);
+  margin-bottom: 12px;
+  overflow: hidden;
+  transition: box-shadow 0.2s;
+}
+.stage-card:hover { box-shadow: 0 2px 8px rgba(26,22,37,0.08); }
+.stage-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px 18px;
+  cursor: pointer;
+  user-select: none;
+  background: var(--paper);
+  border-bottom: 1px solid transparent;
+  transition: background 0.2s;
+}
+.stage-header:hover { background: var(--paper-2); }
+.stage-card.open .stage-header { border-bottom-color: var(--paper-2); }
+.stage-arrow {
+  width: 18px; height: 18px;
+  flex-shrink: 0;
+  transition: transform 0.2s;
+  color: var(--ink-3);
+}
+.stage-card.open .stage-arrow { transform: rotate(90deg); }
+.stage-title { font-size: 14px; font-weight: 700; color: var(--ink); flex: 1; }
+.stage-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+}
+.stage-badge .count { background: var(--violet-light); color: var(--violet); margin-right: 6px; }
+.stage-badge .time { background: var(--paper-2); color: var(--ink-3); }
+.stage-content { display: none; padding: 0; }
+.stage-card.open .stage-content { display: block; }
+
+/* Doc row in stage table */
+.doc-row { border-bottom: 1px solid var(--paper-2); }
+.doc-row:last-child { border-bottom: none; }
+.doc-row-header {
+  display: grid;
+  gap: 10px;
+  padding: 12px 18px;
+  cursor: pointer;
+  align-items: center;
+  transition: background 0.15s;
+}
+.doc-row-header:hover { background: var(--paper); }
+.doc-row.open .doc-row-header { background: var(--paper-2); }
+.doc-row-expand { display: none; padding: 14px 18px; background: var(--paper); border-top: 1px solid var(--paper-2); }
+.doc-row.open .doc-row-expand { display: block; }
+.meta-tag {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+.meta-tag.section { background: var(--violet-light); color: var(--violet); }
+.meta-tag.market { background: var(--emerald-light); color: var(--emerald); }
+.meta-tag.lang { background: var(--amber-light); color: var(--amber); }
+.meta-tag.reason { background: var(--paper-2); color: var(--ink-2); }
+.score-bar {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+.score-bar-fill {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--violet);
+  min-width: 2px;
+  max-width: 80px;
+  transition: width 0.3s;
+}
+
+/* LLM stage special */
+.llm-prompt {
+  background: var(--ink);
+  color: #a8b3cf;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  padding: 12px 14px;
+  border-radius: 8px;
+  max-height: 160px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  margin-bottom: 14px;
+}
+.llm-response {
+  background: var(--violet-light);
+  color: var(--violet);
+  font-size: 14px;
+  line-height: 1.6;
+  padding: 14px;
+  border-radius: 10px;
+  margin-bottom: 14px;
+}
+.llm-meta-row {
+  display: flex;
+  gap: 20px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.llm-meta-row strong { color: var(--ink); }
+
+/* Total latency bar */
+.total-latency {
+  text-align: center;
+  padding: 20px;
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--violet);
+  background: var(--white);
+  border-radius: 14px;
+  border: 1px solid var(--paper-2);
+  margin-top: 16px;
+}
+
+/* Embedding result cards */
+.embed-result-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin-top: 16px;
+}
+.embed-stat {
+  background: var(--white);
+  border-radius: 12px;
+  padding: 16px;
+  text-align: center;
+  border: 1px solid var(--paper-2);
+  box-shadow: 0 1px 4px rgba(26,22,37,0.05);
+}
+.embed-stat-num { font-size: 22px; font-weight: 800; margin-bottom: 4px; }
+.embed-stat-label { font-size: 11px; font-weight: 600; color: var(--ink-3); text-transform: uppercase; letter-spacing: 0.05em; }
+.embed-vector-preview {
+  background: var(--ink);
+  color: #a8b3cf;
+  font-family: 'Courier New', monospace;
+  font-size: 12px;
+  padding: 12px 16px;
+  border-radius: 10px;
+  margin-top: 12px;
+  word-break: break-all;
+  line-height: 1.6;
+}
+
+/* End-to-end chat history */
+.chat-history {
+  max-height: 500px;
+  overflow-y: auto;
+}
+.chat-item {
+  margin-bottom: 14px;
+  border-radius: 12px;
+  overflow: hidden;
+  border: 1px solid var(--paper-2);
+}
+.chat-q {
+  background: var(--violet);
+  color: white;
+  padding: 10px 16px;
+  font-size: 14px;
+  border-radius: 12px 12px 0 0;
+}
+.chat-a {
+  background: var(--white);
+  padding: 12px 16px;
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+}
+.chat-a-meta {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+  font-size: 11px;
+  color: var(--ink-4);
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--paper-2);
+}
+.chat-a-meta strong { color: var(--ink); }
+.chat-sources {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--ink-3);
+}
+.sources-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin-top: 4px;
+}
+.source-tag {
+  background: var(--violet-light);
+  color: var(--violet);
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+}
+
+/* Responsive */
+@media (max-width: 900px) {
+  .doc-row-header { grid-template-columns: 1fr; }
+}
+</style>
+</head>
+<body>
+
+<!-- Top Nav -->
+<nav class="topnav">
+  <h1>RAG 独立测试工具</h1>
+  <a href="/">返回聊天</a>
+</nav>
+
+<!-- Tab Bar -->
+<div class="tab-bar">
+  <button class="tab-btn active" onclick="switchTab('embed')">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+    Embedding 测试
+  </button>
+  <button class="tab-btn" onclick="switchTab('retrieve')">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+    检索测试
+  </button>
+  <button class="tab-btn" onclick="switchTab('e2e')">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/></svg>
+    端到端测试
+  </button>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     PANEL: Embedding 测试
+═══════════════════════════════════════════════ -->
+<div id="panel-embed" class="panel active">
+  <div class="content">
+    <div class="card">
+      <div style="margin-bottom: 14px">
+        <textarea id="embed-text" rows="4" placeholder="输入要测试的文本..." style="width:100%;padding:10px 14px;border:2px solid var(--paper-3);border-radius:10px;font-size:14px;outline:none;box-sizing:border-box;resize:vertical;font-family:inherit"></textarea>
+      </div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        <button class="btn btn-violet" onclick="runEmbedTest()" id="btn-embed">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/></svg>
+          查询 Embedding
+        </button>
+        <span id="embed-status" style="font-size:12px;color:var(--ink-4)"></span>
+      </div>
+    </div>
+
+    <div id="embed-result" style="display:none">
+      <div class="embed-result-grid" id="embed-stats-grid"></div>
+      <div id="embed-vector-preview" class="embed-vector-preview"></div>
+    </div>
+
+    <div id="embed-empty" class="card" style="text-align:center;padding:40px;color:var(--ink-4);font-size:13px">
+      输入文本后点击「查询 Embedding」查看结果
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     PANEL: 检索测试
+═══════════════════════════════════════════════ -->
+<div id="panel-retrieve" class="panel">
+  <div class="content">
+    <!-- 参数控制区 -->
+    <div class="card">
+      <div style="margin-bottom:14px">
+        <input type="text" id="ret-query" placeholder="输入查询词..." style="width:100%;padding:10px 14px;border:2px solid var(--paper-3);border-radius:10px;font-size:14px;outline:none;box-sizing:border-box" onkeydown="if(event.key==='Enter')runRetrieve()" />
+      </div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;font-weight:600;color:var(--ink-3)">Top-K</span>
+          <input type="range" id="ret-topk" min="5" max="50" value="10" style="width:80px" oninput="document.getElementById('ret-topk-val').textContent=this.value" />
+          <span id="ret-topk-val" style="font-size:12px;min-width:24px">10</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;font-weight:600;color:var(--ink-3)">Rerank</span>
+          <input type="range" id="ret-rerankk" min="3" max="20" value="5" style="width:80px" oninput="document.getElementById('ret-rerankk-val').textContent=this.value" />
+          <span id="ret-rerankk-val" style="font-size:12px;min-width:24px">5</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:12px;font-weight:600;color:var(--ink-3)">BM25</span>
+          <input type="range" id="ret-bm25w" min="0" max="100" value="30" style="width:80px" oninput="document.getElementById('ret-bm25w-val').textContent=(this.value/100).toFixed(2)" />
+          <span id="ret-bm25w-val" style="font-size:12px;min-width:36px">0.30</span>
+        </div>
+      </div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center;margin-bottom:14px">
+        <div style="display:flex;align-items:center;gap:6px">
+          <span style="font-size:12px;font-weight:600;color:var(--ink-3)">语言:</span>
+          <label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" id="ret-lang-zh" value="zh" checked />中文</label>
+          <label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" id="ret-lang-en" value="en" checked />英文</label>
+          <label style="display:flex;align-items:center;gap:3px;font-size:12px;cursor:pointer"><input type="checkbox" id="ret-lang-vi" value="vi" checked />越南</label>
+        </div>
+      </div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+        <label class="toggle-label">
+          <div class="toggle">
+            <input type="checkbox" id="ret-hybrid" checked />
+            <div class="toggle-slider"></div>
+          </div>
+          <div><span>Hybrid 混合检索</span><small> · Dense+BM25</small></div>
+        </label>
+        <label class="toggle-label">
+          <div class="toggle">
+            <input type="checkbox" id="ret-llm-rerank" />
+            <div class="toggle-slider"></div>
+          </div>
+          <div><span>LLM 重排</span><small> · 规则+LLM混合</small></div>
+        </label>
+        <label class="toggle-label">
+          <div class="toggle">
+            <input type="checkbox" id="ret-runllm" />
+            <div class="toggle-slider"></div>
+          </div>
+          <div><span>执行 LLM 生成</span><small> · 完整 RAG</small></div>
+        </label>
+        <div style="flex:1"></div>
+        <button class="btn btn-violet" onclick="runRetrieve()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5,3 19,12 5,21 5,3"/></svg>
+          执行检索
+        </button>
+      </div>
+    </div>
+
+    <!-- 阶段时间线 -->
+    <div id="ret-timeline">
+      <div style="text-align:center;color:var(--ink-4);font-size:13px;padding:40px 0;background:var(--white);border-radius:14px;border:1px solid var(--paper-2)">
+        输入查询词后点击「执行检索」查看各阶段结果
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     PANEL: 端到端测试
+═══════════════════════════════════════════════ -->
+<div id="panel-e2e" class="panel">
+  <div class="content">
+    <!-- 查询输入区 -->
+    <div class="card">
+      <div style="margin-bottom:14px">
+        <input type="text" id="e2e-query" placeholder="输入问题..." style="width:100%;padding:10px 14px;border:2px solid var(--paper-3);border-radius:10px;font-size:14px;outline:none;box-sizing:border-box" onkeydown="if(event.key==='Enter')runE2E()" />
+      </div>
+      <div style="display:flex;gap:20px;flex-wrap:wrap;align-items:center">
+        <label class="toggle-label">
+          <div class="toggle">
+            <input type="checkbox" id="e2e-hybrid" checked />
+            <div class="toggle-slider"></div>
+          </div>
+          <div><span>Hybrid</span></div>
+        </label>
+        <label class="toggle-label">
+          <div class="toggle">
+            <input type="checkbox" id="e2e-runllm" checked />
+            <div class="toggle-slider"></div>
+          </div>
+          <div><span>执行 LLM</span></div>
+        </label>
+        <div style="flex:1"></div>
+        <button class="btn btn-violet" onclick="runE2E()" id="btn-e2e">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22,2 15,22 11,13 2,9 22,2"/></svg>
+          发送
+        </button>
+        <button class="btn btn-ghost btn-sm" onclick="clearChatHistory()">清空历史</button>
+      </div>
+    </div>
+
+    <!-- 对话历史 -->
+    <div class="card" style="padding:0">
+      <div style="padding:14px 20px;background:var(--paper);border-bottom:1px solid var(--paper-2);font-size:12px;color:var(--ink-3);font-weight:600;display:flex;align-items:center;justify-content:space-between">
+        <span>对话历史</span>
+        <span id="e2e-count" style="color:var(--violet)">0 条</span>
+      </div>
+      <div id="chat-history" class="chat-history" style="padding:16px">
+        <div id="chat-empty" style="padding:32px;text-align:center;color:var(--ink-4);font-size:13px">
+          输入问题后点击「发送」开始对话
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Toast -->
+<div id="toast"></div>
+
+<script>
+// ── Helpers ────────────────────────────────────────────────────────
+let toastTimer = null;
+function showToast(msg, type = 'info') {
+  const el = document.getElementById('toast');
+  el.textContent = msg; el.className = 'toast show ' + type;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { el.className = 'toast'; }, 3500);
+}
+
+async function apiGet(url) {
+  try {
+    const r = await fetch(url);
+    const text = await r.text();
+    if (!r.ok) return { ok: false, status: r.status, msg: text.slice(0, 200) };
+    try { return { ok: true, data: JSON.parse(text) }; }
+    catch { return { ok: true, data: text }; }
+  } catch(e) { return { ok: false, status: 0, msg: e.message }; }
+}
+
+async function apiPost(url, body) {
+  try {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body || {})
+    });
+    const text = await r.text();
+    if (!r.ok) return { ok: false, status: r.status, msg: text.slice(0, 300) };
+    try { return { ok: true, data: JSON.parse(text) }; }
+    catch { return { ok: true, data: text }; }
+  } catch(e) { return { ok: false, status: 0, msg: e.message }; }
+}
+
+function escHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── Tab nav ──────────────────────────────────────────────────────
+function switchTab(name) {
+  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.tab-btn[onclick="switchTab('${name}')"]`).classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+}
+
+// ═══════════════════════════════════════════════
+// PANEL 1: Embedding 测试
+// ═══════════════════════════════════════════════
+
+async function runEmbedTest() {
+  const text = document.getElementById('embed-text').value.trim();
+  if (!text) { showToast('请输入要测试的文本', 'warning'); return; }
+
+  const statusEl = document.getElementById('embed-status');
+  statusEl.textContent = '查询中...';
+  document.getElementById('embed-result').style.display = 'none';
+  document.getElementById('embed-empty').style.display = 'block';
+
+  const res = await apiGet(`/api/v1/debug/embed?text=${encodeURIComponent(text)}`);
+
+  if (!res.ok) {
+    statusEl.textContent = '';
+    showToast('API 调用失败: ' + res.msg, 'error');
+    return;
+  }
+
+  const d = res.data;
+  statusEl.textContent = '';
+
+  document.getElementById('embed-empty').style.display = 'none';
+  document.getElementById('embed-result').style.display = 'block';
+
+  // 渲染统计卡片
+  document.getElementById('embed-stats-grid').innerHTML = `
+    <div class="embed-stat">
+      <div class="embed-stat-num" style="color:var(--violet)">${d.token_count ?? '-'}</div>
+      <div class="embed-stat-label">Token 数</div>
+    </div>
+    <div class="embed-stat">
+      <div class="embed-stat-num" style="color:var(--emerald)">${d.vector_dim ?? '-'}</div>
+      <div class="embed-stat-label">向量维度</div>
+    </div>
+    <div class="embed-stat">
+      <div class="embed-stat-num" style="color:var(--amber)">${d.latency_ms != null ? d.latency_ms.toFixed(1) + 'ms' : '-'}</div>
+      <div class="embed-stat-label">延迟</div>
+    </div>
+  `;
+
+  // 向量前5维预览
+  const preview = d.vector_preview || [];
+  document.getElementById('embed-vector-preview').innerHTML =
+    '<span style="color:#4a5568">前5维: </span>[' + preview.map(v => v.toFixed(4)).join(', ') + ']';
+}
+
+// ═══════════════════════════════════════════════
+// PANEL 2: 检索测试
+// ═══════════════════════════════════════════════
+
+async function runRetrieve() {
+  const query = document.getElementById('ret-query').value.trim();
+  if (!query) { showToast('请输入查询词', 'warning'); return; }
+  const params = {
+    query,
+    top_k: parseInt(document.getElementById('ret-topk').value),
+    rerank_top_k: parseInt(document.getElementById('ret-rerankk').value),
+    hybrid_search: document.getElementById('ret-hybrid').checked,
+    bm25_weight: parseFloat(document.getElementById('ret-bm25w').value) / 100,
+    use_llm_rerank: document.getElementById('ret-llm-rerank').checked,
+    run_llm: document.getElementById('ret-runllm').checked,
+    lang_filter: ['zh','en','vi'].filter(l => document.getElementById('ret-lang-' + l) && document.getElementById('ret-lang-' + l).checked),
+    intent: 'product_qa'
+  };
+
+  const timeline = document.getElementById('ret-timeline');
+  timeline.innerHTML = `<div style="text-align:center;padding:40px 0;color:var(--violet);font-size:13px">
+    <span class="spinner" style="display:inline-block;width:20px;height:20px;border:2px solid var(--paper-3);border-top-color:var(--violet);border-radius:50%;animation:spin 0.7s linear infinite;vertical-align:middle;margin-right:8px"></span>
+    执行中... (${params.top_k} docs)
+  </div>`;
+
+  const res = await apiPost('/api/v1/debug/retrieve', params);
+  if (!res.ok) {
+    timeline.innerHTML = `<div style="padding:24px;text-align:center;color:var(--rose);font-size:13px">调用失败: ${escHtml(res.msg)}</div>`;
+    showToast('API 调用失败', 'error');
+    return;
+  }
+
+  const data = res.data;
+  const stages = data.stages || {};
+
+  // 生成阶段卡片
+  const stageOrder = ['dense'];
+  if (params.hybrid_search) stageOrder.push('bm25', 'rrf');
+  stageOrder.push('rerank');
+  if (params.run_llm && stages.llm) stageOrder.push('llm');
+
+  let html = '';
+
+  // Dense 卡片
+  if (stages.dense) {
+    html += renderStageCard(
+      'Dense 向量召回',
+      stages.dense.count || 0,
+      stages.dense.duration_ms || 0,
+      renderDenseTable(stages.dense.items || []),
+      'dense',
+      'var(--violet)'
+    );
+  }
+
+  // BM25 卡片
+  if (stages.bm25) {
+    html += renderStageCard(
+      'BM25 关键词召回',
+      stages.bm25.count || 0,
+      stages.bm25.duration_ms || 0,
+      renderBm25Table(stages.bm25.items || []),
+      'bm25',
+      'var(--emerald)'
+    );
+  }
+
+  // RRF 卡片
+  if (stages.rrf) {
+    html += renderStageCard(
+      'RRF 融合排序',
+      stages.rrf.count || 0,
+      stages.rrf.duration_ms || 0,
+      renderRrfTable(stages.rrf.items || []),
+      'rrf',
+      'var(--amber)'
+    );
+  }
+
+  // Rerank 卡片
+  if (stages.rerank) {
+    html += renderStageCard(
+      'MMR 重排 · ' + (stages.rerank.method === 'rule+llm' ? '规则+LLM' : '规则'),
+      stages.rerank.count || 0,
+      stages.rerank.duration_ms || 0,
+      renderRerankTable(stages.rerank.items || []),
+      'rerank',
+      'var(--rose)'
+    );
+  }
+
+  // LLM 卡片
+  if (stages.llm) {
+    html += renderLlmCard(stages.llm);
+  }
+
+  // 总耗时
+  const totalMs = data.total_latency_ms || 0;
+  html += `<div class="total-latency">总耗时: ${totalMs.toFixed(1)} ms</div>`;
+
+  timeline.innerHTML = html;
+}
+
+function renderStageCard(title, count, duration, contentHtml, stageId, color) {
+  return `<div class="stage-card" id="stage-${stageId}">
+    <div class="stage-header" onclick="this.closest('.stage-card').classList.toggle('open')">
+      <svg class="stage-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9,18 15,12 9,6"/></svg>
+      <span class="stage-title" style="display:flex;align-items:center;gap:8px">
+        <span style="width:10px;height:10px;border-radius:50%;background:${color};flex-shrink:0"></span>
+        ${escHtml(title)}
+      </span>
+      <span class="stage-badge">
+        <span class="count">${count}</span>
+        <span class="time">${duration.toFixed(1)}ms</span>
+      </span>
+    </div>
+    <div class="stage-content">${contentHtml}</div>
+  </div>`;
+}
+
+function renderDenseTable(items) {
+  if (!items.length) return '<div style="padding:16px;text-align:center;color:var(--ink-4);font-size:13px">无结果</div>';
+  return `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="background:var(--paper-2)">
+          <th style="padding:8px 18px;text-align:left;font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:0.05em;border-radius:8px 8px 0 0">Content</th>
+          <th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--ink-3);min-width:90px">Score</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map((item, i) => `
+        <tr class="doc-row" id="dense-row-${i}">
+          <td style="padding:10px 18px;vertical-align:top">
+            <div class="doc-row-header" style="grid-template-columns:1fr auto" onclick="toggleDocRow('dense-row-${i}')">
+              <div>
+                <div style="font-size:13px;line-height:1.4;color:var(--ink);margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(item.content || '')}</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">
+                  ${item.section_type ? `<span class="meta-tag section">${escHtml(item.section_type)}</span>` : ''}
+                  ${(item.markets || []).slice(0,3).map(m => `<span class="meta-tag market">${escHtml(m)}</span>`).join('')}
+                  ${item.lang ? `<span class="meta-tag lang">${escHtml(item.lang)}</span>` : ''}
+                </div>
+              </div>
+              <div class="score-bar">
+                <div class="score-bar-fill" style="width:${Math.min(Math.max((item.dense_score||0)*50, 2), 80)}px;background:var(--violet)"></div>
+                <span>${(item.dense_score||0).toFixed(3)}</span>
+              </div>
+            </div>
+            <div class="doc-row-expand">
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">完整内容</div>
+              <div style="background:var(--paper);border-radius:8px;padding:12px;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto;margin-bottom:10px">${escHtml(item.content || '')}</div>
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">Metadata</div>
+              <pre style="background:var(--ink);color:#a8b3cf;font-family:'Courier New',monospace;font-size:11px;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto">${escHtml(JSON.stringify({section_type:item.section_type,markets:item.markets,lang:item.lang,hierarchy:item.hierarchy,source:item.source,dense_score:item.dense_score}, null, 2))}</pre>
+            </div>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function renderBm25Table(items) {
+  if (!items.length) return '<div style="padding:16px;text-align:center;color:var(--ink-4);font-size:13px">无结果</div>';
+  return `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="background:var(--paper-2)">
+          <th style="padding:8px 18px;text-align:left;font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:0.05em;border-radius:8px 8px 0 0">Content</th>
+          <th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--ink-3);min-width:140px">Raw / Norm</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map((item, i) => `
+        <tr class="doc-row" id="bm25-row-${i}">
+          <td style="padding:10px 18px;vertical-align:top">
+            <div class="doc-row-header" style="grid-template-columns:1fr auto" onclick="toggleDocRow('bm25-row-${i}')">
+              <div>
+                <div style="font-size:13px;line-height:1.4;color:var(--ink);margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(item.content || '')}</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">
+                  ${item.section_type ? `<span class="meta-tag section">${escHtml(item.section_type)}</span>` : ''}
+                  ${(item.markets || []).slice(0,3).map(m => `<span class="meta-tag market">${escHtml(m)}</span>`).join('')}
+                  ${item.lang ? `<span class="meta-tag lang">${escHtml(item.lang)}</span>` : ''}
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:11px;font-weight:600;white-space:nowrap">
+                <span style="color:var(--ink)">${(item.bm25_raw||0).toFixed(2)}</span>
+                <span style="color:var(--emerald)">${(item.bm25_norm||0).toFixed(3)}</span>
+              </div>
+            </div>
+            <div class="doc-row-expand">
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">完整内容</div>
+              <div style="background:var(--paper);border-radius:8px;padding:12px;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto;margin-bottom:10px">${escHtml(item.content || '')}</div>
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">Metadata</div>
+              <pre style="background:var(--ink);color:#a8b3cf;font-family:'Courier New',monospace;font-size:11px;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto">${escHtml(JSON.stringify({bm25_raw:item.bm25_raw,bm25_norm:item.bm25_norm,section_type:item.section_type,markets:item.markets,lang:item.lang,source:item.source}, null, 2))}</pre>
+            </div>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function renderRrfTable(items) {
+  if (!items.length) return '<div style="padding:16px;text-align:center;color:var(--ink-4);font-size:13px">无结果</div>';
+  return `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="background:var(--paper-2)">
+          <th style="padding:8px 18px;text-align:left;font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:0.05em;border-radius:8px 8px 0 0">Content</th>
+          <th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--ink-3);min-width:120px">Score / Ranks</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map((item, i) => `
+        <tr class="doc-row" id="rrf-row-${i}">
+          <td style="padding:10px 18px;vertical-align:top">
+            <div class="doc-row-header" style="grid-template-columns:1fr auto" onclick="toggleDocRow('rrf-row-${i}')">
+              <div>
+                <div style="font-size:13px;line-height:1.4;color:var(--ink);margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(item.content || '')}</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">
+                  ${item.section_type ? `<span class="meta-tag section">${escHtml(item.section_type)}</span>` : ''}
+                  ${(item.markets || []).slice(0,3).map(m => `<span class="meta-tag market">${escHtml(m)}</span>`).join('')}
+                  ${item.lang ? `<span class="meta-tag lang">${escHtml(item.lang)}</span>` : ''}
+                </div>
+              </div>
+              <div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px;font-size:11px;font-weight:600;white-space:nowrap">
+                <span style="color:var(--amber)">${(item.rrf_score||0).toFixed(3)}</span>
+                <span style="color:var(--ink-3);font-size:10px">D:<span style="color:var(--violet)">#${item.dense_rank||'?'}</span> B:<span style="color:var(--emerald)">#${item.bm25_rank||'?'}</span></span>
+              </div>
+            </div>
+            <div class="doc-row-expand">
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">完整内容</div>
+              <div style="background:var(--paper);border-radius:8px;padding:12px;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto;margin-bottom:10px">${escHtml(item.content || '')}</div>
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">Metadata</div>
+              <pre style="background:var(--ink);color:#a8b3cf;font-family:'Courier New',monospace;font-size:11px;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all">${escHtml(JSON.stringify({rrf_score:item.rrf_score,dense_rank:item.dense_rank,bm25_rank:item.bm25_rank,section_type:item.section_type,markets:item.markets,lang:item.lang,source:item.source}, null, 2))}</pre>
+            </div>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function renderRerankTable(items) {
+  if (!items.length) return '<div style="padding:16px;text-align:center;color:var(--ink-4);font-size:13px">无结果</div>';
+  return `<div style="overflow-x:auto">
+    <table style="width:100%;border-collapse:collapse;font-size:13px">
+      <thead>
+        <tr style="background:var(--paper-2)">
+          <th style="padding:8px 18px;text-align:left;font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:0.05em;border-radius:8px 8px 0 0">Content</th>
+          <th style="padding:8px 12px;text-align:right;font-size:11px;font-weight:700;color:var(--ink-3);min-width:100px">Score</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map((item, i) => `
+        <tr class="doc-row" id="rerank-row-${i}">
+          <td style="padding:10px 18px;vertical-align:top">
+            <div class="doc-row-header" style="grid-template-columns:1fr auto" onclick="toggleDocRow('rerank-row-${i}')">
+              <div>
+                <div style="font-size:13px;line-height:1.4;color:var(--ink);margin-bottom:6px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(item.content || '')}</div>
+                <div style="display:flex;gap:4px;flex-wrap:wrap">
+                  ${item.section_type ? `<span class="meta-tag section">${escHtml(item.section_type)}</span>` : ''}
+                  ${(item.markets || []).slice(0,3).map(m => `<span class="meta-tag market">${escHtml(m)}</span>`).join('')}
+                  ${item.lang ? `<span class="meta-tag lang">${escHtml(item.lang)}</span>` : ''}
+                  ${item.mmr_reason ? `<span class="meta-tag reason">${escHtml(item.mmr_reason)}</span>` : ''}
+                </div>
+              </div>
+              <div class="score-bar">
+                <div class="score-bar-fill" style="width:${Math.min(Math.max((item.rerank_score||0)*80, 2), 80)}px;background:var(--rose)"></div>
+                <span style="color:var(--rose)">${(item.rerank_score||0).toFixed(3)}</span>
+              </div>
+            </div>
+            <div class="doc-row-expand">
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">完整内容</div>
+              <div style="background:var(--paper);border-radius:8px;padding:12px;font-size:12px;line-height:1.6;white-space:pre-wrap;word-break:break-all;max-height:200px;overflow-y:auto;margin-bottom:10px">${escHtml(item.content || '')}</div>
+              <div style="font-size:11px;color:var(--ink-3);margin-bottom:6px">Metadata</div>
+              <pre style="background:var(--ink);color:#a8b3cf;font-family:'Courier New',monospace;font-size:11px;padding:12px;border-radius:8px;white-space:pre-wrap;word-break:break-all">${escHtml(JSON.stringify({rerank_score:item.rerank_score,mmr_reason:item.mmr_reason,section_type:item.section_type,markets:item.markets,lang:item.lang,source:item.source}, null, 2))}</pre>
+            </div>
+          </td>
+        </tr>`).join('')}
+      </tbody>
+    </table>
+  </div>`;
+}
+
+function renderLlmCard(llm) {
+  const promptPreview = escHtml(llm.prompt_preview || llm.message || '');
+  const response = escHtml(llm.message || '');
+  const intent = llm.intent || '';
+  const tokens = llm.tokens_used || 0;
+  const latency = llm.latency_ms || 0;
+
+  return `<div class="stage-card" id="stage-llm">
+    <div class="stage-header" onclick="this.closest('.stage-card').classList.toggle('open')">
+      <svg class="stage-arrow" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="9,18 15,12 9,6"/></svg>
+      <span class="stage-title" style="display:flex;align-items:center;gap:8px">
+        <span style="width:10px;height:10px;border-radius:50%;background:var(--slate);flex-shrink:0"></span>
+        LLM 生成
+      </span>
+      <span class="stage-badge">
+        <span class="time">${latency.toFixed(1)}ms</span>
+      </span>
+    </div>
+    <div class="stage-content">
+      ${promptPreview ? `<div style="padding:14px 18px 0">
+        <div style="font-size:11px;font-weight:700;color:var(--ink-3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:8px">Prompt Preview</div>
+        <div class="llm-prompt">${promptPreview.length > 2000 ? escHtml(promptPreview.slice(0,2000)) + '\n\n... (truncated)' : promptPreview}</div>
+      </div>` : ''}
+      <div style="padding:14px 18px">
+        ${response ? `<div class="llm-response">${response}</div>` : ''}
+        <div class="llm-meta-row">
+          <span>意图: <strong>${escHtml(intent)}</strong></span>
+          <span>Tokens: <strong>${tokens}</strong></span>
+          <span>耗时: <strong>${latency.toFixed(1)}ms</strong></span>
+        </div>
+      </div>
+    </div>
+  </div>`;
+}
+
+function toggleDocRow(rowId) {
+  const row = document.getElementById(rowId);
+  if (row) row.classList.toggle('open');
+}
+
+// ═══════════════════════════════════════════════
+// PANEL 3: 端到端测试
+// ═══════════════════════════════════════════════
+
+let chatSession = null;
+let chatCount = 0;
+
+// WebSocket 配置
+let chatWs = null;
+let chatWsConnected = false;
+let chatWsMode = false; // 是否使用 WebSocket 模式
+let currentChatAnsEl = null;
+let accumulatedChat = "";
+
+function initChatWebSocket() {
+    if (chatWs && chatWs.readyState === WebSocket.OPEN) return;
+
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const wsUrl = `${protocol}//${window.location.host}/ws/chat?user_id=test-user${chatSession ? '&session_id=' + chatSession : ''}`;
+
+    chatWs = new WebSocket(wsUrl);
+
+    chatWs.onopen = () => {
+        console.log('Chat WebSocket connected');
+        chatWsConnected = true;
+        const btn = document.getElementById('btn-e2e');
+        if (btn) btn.textContent = btn.textContent.replace('(WebSocket)', '').trim();
+    };
+
+    chatWs.onclose = () => {
+        console.log('Chat WebSocket disconnected');
+        chatWsConnected = false;
+    };
+
+    chatWs.onmessage = (event) => {
+        try {
+            const data = JSON.parse(event.data);
+            handleChatWsMessage(data);
+        } catch (e) {
+            console.error('Failed to parse chat message:', e);
+        }
+    };
+}
+
+function handleChatWsMessage(data) {
+    switch (data.type) {
+        case 'chunk':
+            if (currentChatAnsEl) {
+                accumulatedChat += data.content;
+                currentChatAnsEl.innerHTML = `${escHtml(accumulatedChat)}<span style="color:var(--ink-4)">▌</span>`;
+                document.getElementById('chat-history').scrollTop = document.getElementById('chat-history').scrollHeight;
+            }
+            break;
+
+        case 'done':
+            if (currentChatAnsEl) {
+                accumulatedChat = accumulatedChat || '（无响应）';
+                let meta = `<div class="chat-a-meta">`;
+                if (data.intent) meta += `<span>意图: <strong>${escHtml(data.intent)}</strong></span>`;
+                meta += `</div>`;
+                if (data.sources && data.sources.length) {
+                    meta += `<div class="chat-sources">来源: <div class="sources-list">${data.sources.map(s => `<span class="source-tag">${escHtml(String(s))}</span>`).join('')}</div></div>`;
+                }
+                currentChatAnsEl.innerHTML = `${escHtml(accumulatedChat)}${meta}`;
+            }
+            chatSession = data.session_id;
+            currentChatAnsEl = null;
+            accumulatedChat = "";
+            chatCount++;
+            document.getElementById('e2e-count').textContent = chatCount + ' 条';
+            const btn = document.getElementById('btn-e2e');
+            if (btn) { btn.disabled = false; btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22,2 15,22 11,13 2,9 22,2"/></svg> 发送 (WebSocket)'; }
+            break;
+
+        case 'message_received':
+            chatSession = data.session_id;
+            accumulatedChat = "";
+            break;
+
+        case 'error':
+            if (currentChatAnsEl) {
+                currentChatAnsEl.innerHTML = `<span style="color:var(--rose)">错误: ${escHtml(data.message)}</span>`;
+            }
+            currentChatAnsEl = null;
+            accumulatedChat = "";
+            const errBtn = document.getElementById('btn-e2e');
+            if (errBtn) { errBtn.disabled = false; }
+            break;
+    }
+}
+
+async function runE2E() {
+  const query = document.getElementById('e2e-query').value.trim();
+  if (!query) { showToast('请输入问题', 'warning'); return; }
+
+  const btn = document.getElementById('btn-e2e');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner"></span> 处理中...';
+
+  const emptyEl = document.getElementById('chat-empty');
+  if (emptyEl) emptyEl.style.display = 'none';
+
+  const history = document.getElementById('chat-history');
+
+  // 追加提问
+  history.insertAdjacentHTML('beforeend', `<div class="chat-item" id="chat-item-${chatCount}">
+    <div class="chat-q">${escHtml(query)}</div>
+    <div class="chat-a" id="chat-ans-${chatCount}">
+      <span style="color:var(--ink-4);font-size:13px">等待响应...</span>
+    </div>
+  </div>`);
+
+  // 清空输入框
+  document.getElementById('e2e-query').value = '';
+
+  // 使用 WebSocket
+  if (chatWsConnected) {
+    currentChatAnsEl = document.getElementById('chat-ans-' + chatCount);
+    accumulatedChat = "";
+    chatWs.send(JSON.stringify({
+        type: 'message',
+        content: query,
+        session_id: chatSession || undefined
+    }));
+    return;
+  }
+
+  // 备用：HTTP
+  try {
+    const res = await fetch('/api/v1/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ message: query, user_id: 'test-user', session_id: chatSession })
+    });
+    const data = await res.json();
+    chatSession = data.session_id;
+
+    const ansEl = document.getElementById('chat-ans-' + chatCount);
+    if (data.message) {
+      ansEl.innerHTML = `${escHtml(data.message)}
+        <div class="chat-a-meta">
+          ${data.intent ? `<span>意图: <strong>${escHtml(data.intent)}</strong></span>` : ''}
+          <span>耗时: <strong>${(data.latency_ms || 0).toFixed(0)}ms</strong></span>
+          <span>Tokens: <strong>${data.tokens_used || 0}</strong></span>
+        </div>
+        ${data.sources && data.sources.length ? `<div class="chat-sources">来源: <div class="sources-list">${data.sources.map(s => `<span class="source-tag">${escHtml(String(s))}</span>`).join('')}</div></div>` : ''}`;
+    } else {
+      ansEl.innerHTML = '<span style="color:var(--rose)">（无响应）</span>';
+    }
+
+    chatCount++;
+    document.getElementById('e2e-count').textContent = chatCount + ' 条';
+
+    // 滚动到底部
+    history.scrollTop = history.scrollHeight;
+
+  } catch(e) {
+    const ansEl = document.getElementById('chat-ans-' + chatCount);
+    ansEl.innerHTML = `<span style="color:var(--rose)">错误: ${escHtml(e.message)}</span>`;
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22,2 15,22 11,13 2,9 22,2"/></svg> 发送';
+  }
+}
+
+function clearChatHistory() {
+  document.getElementById('chat-history').innerHTML = '<div id="chat-empty" style="padding:32px;text-align:center;color:var(--ink-4);font-size:13px">记录已清空</div>';
+  chatSession = null;
+  chatCount = 0;
+  document.getElementById('e2e-count').textContent = '0 条';
+}
+
+// 初始化 WebSocket
+document.addEventListener('DOMContentLoaded', initChatWebSocket);
+window.addEventListener('beforeunload', () => { if (chatWs) chatWs.close(); });
+</script>
+</body>
+</html>

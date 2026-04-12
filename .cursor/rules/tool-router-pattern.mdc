@@ -1,0 +1,248 @@
+# Tool Router Pattern
+
+## 概述
+
+工具路由层（Tool Router）统一封装所有外部业务系统接口（订单/物流/退款/FAQ），通过装饰器注册机制实现零代码扩展。熔断降级策略保证系统韧性。
+
+## 目录结构
+
+```
+services/
+├── tool_router.py              # 核心路由器
+└── tools/
+    ├── __init__.py
+    ├── base.py                 # Tool 基类和注册装饰器
+    ├── order_tool.py           # 订单查询工具
+    ├── logistics_tool.py       # 物流查询工具
+    ├── refund_tool.py          # 退款工具
+    └── qa_tool.py              # FAQ 知识库工具
+```
+
+## 核心抽象: ToolBase
+
+```python
+from abc import ABC, abstractmethod
+from dataclasses import dataclass
+from typing import Any
+import asyncio
+
+@dataclass
+class ToolResult:
+    success: bool
+    data: Any | None = None
+    error: str | None = None
+    source: str = ""  # 用于引用展示
+
+class ToolBase(ABC):
+    """所有工具必须继承的基类"""
+
+    name: str          # 唯一标识，如 "order_query"
+    description: str   # 用于 LLM 判断是否调用此工具
+    param_schema: dict # JSON Schema 描述参数
+
+    @abstractmethod
+    async def execute(self, params: dict) -> ToolResult:
+        """工具执行逻辑，子类实现"""
+        pass
+
+    def get_timeout(self) -> float:
+        """默认超时 5s，可被子类覆盖"""
+        return 5.0
+```
+
+## 装饰器注册机制
+
+```python
+# tools/base.py
+TOOL_REGISTRY: dict[str, type[ToolBase]] = {}
+
+def register_tool(name: str, description: str, param_schema: dict):
+    """
+    装饰器: 注册工具到全局注册表
+    用法: @register_tool("order_query", "查询订单详情", {...})
+    """
+    def decorator(cls: type[ToolBase]):
+        cls.name = name
+        cls.description = description
+        cls.param_schema = param_schema
+        TOOL_REGISTRY[name] = cls
+        return cls
+    return decorator
+
+# 业务层使用
+@register_tool(
+    name="order_query",
+    description="查询用户订单详情，包括订单状态、商品信息、收货地址",
+    param_schema={
+        "type": "object",
+        "properties": {
+            "order_id": {"type": "string", "description": "订单号"},
+            "user_id": {"type": "string", "description": "用户ID"}
+        },
+        "required": ["order_id"]
+    }
+)
+class OrderTool(ToolBase):
+    async def execute(self, params: dict) -> ToolResult:
+        order_id = params["order_id"]
+        # 调用订单系统 API...
+        return ToolResult(success=True, data={...}, source="订单系统")
+```
+
+## 核心路由器: ToolRouter
+
+```python
+# tool_router.py
+from services.tools.base import TOOL_REGISTRY, ToolBase, ToolResult
+import asyncio
+
+class CircuitBreaker:
+    """熔断器: 3次失败触发熔断，30s后半恢复"""
+
+    def __init__(self, name: str):
+        self.name = name
+        self.failure_count = 0
+        self.failure_threshold = 3
+        self.cooldown_seconds = 30
+        self.last_failure_time: float | None = None
+        self.state = "closed"  # closed | open | half_open
+
+    def record_failure(self):
+        self.failure_count += 1
+        self.last_failure_time = time.monotonic()
+        if self.failure_count >= self.failure_threshold:
+            self.state = "open"
+
+    def record_success(self):
+        self.failure_count = 0
+        self.state = "closed"
+
+    def can_execute(self) -> bool:
+        if self.state == "closed":
+            return True
+        if self.state == "open":
+            if self.last_failure_time and \
+               time.monotonic() - self.last_failure_time > self.cooldown_seconds:
+                self.state = "half_open"
+                return True
+            return False
+        return True
+
+
+class ToolRouter:
+    """工具路由唯一入口"""
+
+    def __init__(self):
+        self._tools: dict[str, ToolBase] = {}
+        self._circuit_breakers: dict[str, CircuitBreaker] = {}
+        self._register_all_tools()
+
+    def _register_all_tools(self):
+        """启动时实例化所有已注册工具"""
+        import services.tools  # 触发注册装饰器
+        for name, tool_cls in TOOL_REGISTRY.items():
+            self._tools[name] = tool_cls()
+            self._circuit_breakers[name] = CircuitBreaker(name)
+
+    async def execute(self, tool_name: str, params: dict, request_id: str) -> ToolResult:
+        """唯一执行入口，带熔断保护"""
+        if tool_name not in self._tools:
+            return ToolResult(success=False, error=f"未知工具: {tool_name}")
+
+        tool = self._tools[tool_name]
+        cb = self._circuit_breakers[tool_name]
+
+        if not cb.can_execute():
+            return ToolResult(
+                success=False,
+                error="服务暂时繁忙，请稍后再试",
+                source=tool.name
+            )
+
+        try:
+            result = await asyncio.wait_for(
+                tool.execute(params),
+                timeout=tool.get_timeout()
+            )
+            cb.record_success()
+            return result
+        except asyncio.TimeoutError:
+            cb.record_failure()
+            return ToolResult(
+                success=False,
+                error=f"服务响应超时，请稍后再试",
+                source=tool.name
+            )
+        except Exception as e:
+            cb.record_failure()
+            return ToolResult(
+                success=False,
+                error="服务异常，请联系客服",
+                source=tool.name
+            )
+
+    def list_tools(self) -> list[dict]:
+        """列出所有可用工具，用于 LLM Function Calling"""
+        return [
+            {
+                "name": tool.name,
+                "description": tool.description,
+                "parameters": tool.param_schema
+            }
+            for tool in self._tools.values()
+        ]
+```
+
+## 调用方式
+
+业务层（Service）通过 `ToolRouter` 统一调用，不直接引用具体工具：
+
+```python
+# services/intent_service.py 或 services/chat_service.py
+class IntentService:
+    def __init__(self, tool_router: ToolRouter = Depends(get_tool_router)):
+        self.router = tool_router
+
+    async def handle_order_query(self, order_id: str, user_id: str, request_id: str):
+        result = await self.router.execute(
+            tool_name="order_query",
+            params={"order_id": order_id, "user_id": user_id},
+            request_id=request_id
+        )
+        if not result.success:
+            return self._fallback_response(result.error)
+        return result.data
+```
+
+## 扩展新工具: 步骤
+
+1. 在 `services/tools/` 下创建 `xxx_tool.py`
+2. 继承 `ToolBase`，实现 `execute()` 方法
+3. 使用 `@register_tool(name, description, param_schema)` 装饰器注册
+4. 在 `services/tools/__init__.py` 导入（触发注册）
+5. **无需修改** `ToolRouter` 或任何调用方代码
+
+## 熔断降级策略
+
+| 状态 | 行为 |
+|------|------|
+| Closed（正常） | 请求正常执行 |
+| Open（熔断） | 直接返回友好错误，不执行请求 |
+| Half-Open（半开） | 放行一个请求试探，成功则 Closed，失败则 Open |
+
+降级时返回统一话术，不暴露系统内部错误：
+
+```python
+TOOL_FALLBACK_MESSAGES = {
+    "order_query": "抱歉，暂时无法查询订单，请稍后重试或拨打客服热线",
+    "logistics": "物流查询服务暂时不可用，请稍后再试",
+    "refund": "退款服务暂时繁忙，请稍后在我的订单中自助申请",
+}
+```
+
+## 禁止事项
+
+- 禁止在业务层直接 `import` 具体工具类，必须通过 `ToolRouter.execute()`
+- 禁止在工具内部抛出未捕获异常（统一在 `ToolRouter.execute()` 中捕获）
+- 禁止硬编码工具超时（通过 `get_timeout()` 配置化）
+- 禁止在 `execute()` 中直接 `return` 字符串/Dict，必须返回 `ToolResult`

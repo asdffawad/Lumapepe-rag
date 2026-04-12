@@ -1,0 +1,298 @@
+services:
+  # ========================================================================
+  # 后端 API 服务
+  # ========================================================================
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-backend
+    ports:
+      - "8000:8000"
+    working_dir: /app/backend
+    environment:
+      - PYTHONPATH=/app/backend
+      # MySQL
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-rag2026}
+      - MYSQL_DATABASE=rag_customer_service
+      - MYSQL_POOL_SIZE=10
+      # Redis
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_DB=0
+      # Milvus（使用 Docker 网络中的容器名）
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      - MILVUS_COLLECTION=knowledge_base
+      # Celery
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      # LLM
+      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - LLM_MODEL_NAME=${LLM_MODEL_NAME:-qwen-max}
+      - LLM_FALLBACK_MODELS=${LLM_FALLBACK_MODELS:-qwen-plus,qwen-turbo}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://dashscope.aliyuncs.com}
+      - LLM_TIMEOUT=60
+      - LLM_MAX_RETRIES=3
+      - LLM_TEMPERATURE=0.7
+      - LLM_MAX_TOKENS=2048
+      # 安全
+      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
+      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      # 限流
+      - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
+      - RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL:-200}
+      - RATE_LIMIT_USER=${RATE_LIMIT_USER:-60}
+      - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
+      # RAG
+      - RAG_TOP_K=10
+      - RAG_RERANK_TOP_K=5
+      - RAG_HYBRID_SEARCH=true
+      - RAG_HNSW_AUTO=true
+      - RAG_RRF_K=60
+      - RAG_BM25_WEIGHT=0.3
+      - RAG_LLM_TIMEOUT_MS=60000
+      # Milvus
+      - MILVUS_ENTITY_COUNT_HINT=1000000
+      # 监控
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DEBUG=${DEBUG:-false}
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+    volumes:
+      - ./data:/app/data
+      - ./scripts:/app/scripts
+      - ./backend:/app/backend
+    networks:
+      - rag-network
+
+  # ========================================================================
+  # Celery Worker（异步任务处理器）
+  # ========================================================================
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-celery-worker
+    working_dir: /app/backend
+    command: celery -A celery_app worker --loglevel=info --prefetch-multiplier=1
+    environment:
+      - PYTHONPATH=/app/backend
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-rag2026}
+      - MYSQL_DATABASE=rag_customer_service
+      - REDIS_URL=redis://redis:6379/0
+      - MILVUS_HOST=milvus
+      - MILVUS_PORT=19530
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.25"
+          memory: 128M
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      milvus:
+        condition: service_healthy
+    networks:
+      - rag-network
+
+  # ========================================================================
+  # Celery Beat（定时任务调度器）
+  # ========================================================================
+  celery_beat:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-celery-beat
+    working_dir: /app/backend
+    command: celery -A celery_app beat --loglevel=info --scheduler=redbeat.RedBeatScheduler
+    environment:
+      - PYTHONPATH=/app/backend
+      - CELERY_BROKER_URL=redis://redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - REDBEAT_REDIS_URL=redis://redis:6379/3
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    depends_on:
+      redis:
+        condition: service_healthy
+      backend:
+        condition: service_started
+    networks:
+      - rag-network
+
+  # ========================================================================
+  # MySQL 数据库
+  # ========================================================================
+  mysql:
+    image: mysql:8.0
+    container_name: rag-mysql
+    ports:
+      - "3307:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-rag2026}
+      - MYSQL_DATABASE=rag_customer_service
+      - MYSQL_CHARACTER_SET_SERVER=utf8mb4
+      - MYSQL_COLLATION_SERVER=utf8mb4_unicode_ci
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --max_connections=200
+      --innodb_buffer_pool_size=256M
+      --innodb_log_file_size=64M
+      --slow_query_log=1
+      --long_query_time=2
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./scripts/init_mysql.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ========================================================================
+  # Redis 缓存（兼 Celery Broker）
+  # ========================================================================
+  redis:
+    image: redis:7-alpine
+    container_name: rag-redis
+    ports:
+      - "6380:6379"
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save "" --appendonly no
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ========================================================================
+  # Milvus 向量数据库（Standalone 模式）
+  # ========================================================================
+  milvus:
+    image: milvusdb/milvus:v2.4.14
+    container_name: rag-milvus
+    command: ["/milvus/bin/milvus", "run", "standalone"]
+    ports:
+      - "19531:19530"
+      - "9092:9091"
+    environment:
+      - ETCD_USE_EMBED=true
+      - ETCD_DATA_DIR=/var/lib/milvus/etcd
+      - MINIO_USE_EMBED=true
+      - MINIO_DATA_DIR=/var/lib/milvus/minio
+      - COMMON_STORAGETYPE=local
+    volumes:
+      - milvus_data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      timeout: 15s
+      retries: 12
+      start_period: 180s
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 6G
+        reservations:
+          cpus: "1.0"
+          memory: 2G
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+  # ========================================================================
+  # 前端（静态文件 + API 反向代理）
+  # ========================================================================
+  frontend:
+    image: nginx:alpine
+    container_name: rag-frontend
+    ports:
+      - "80:80"
+    volumes:
+      - ./frontend/index.html:/usr/share/nginx/html/index.html:ro
+      - ./frontend/admin.html:/usr/share/nginx/html/admin.html:ro
+      - ./frontend/test.html:/usr/share/nginx/html/test.html:ro
+      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    networks:
+      - rag-network
+    restart: unless-stopped
+
+networks:
+  rag-network:
+    driver: bridge
+
+volumes:
+  mysql_data:
+  redis_data:
+  milvus_data:

@@ -1,0 +1,2 @@
+pip install python-docx -q
+python "f:\Myprogram\cursor\work\RAG\_extract_docx.py"
