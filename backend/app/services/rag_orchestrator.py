@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, AsyncGenerator
 
 from app.config import RAGConfig
+from app.logging_config import get_logger
 from app.services.query_rewriter import QueryRewriter, RewrittenQuery
 from app.services.vector_retriever import VectorRetriever, RetrievedDoc
 from app.services.reranker import Reranker, RerankedDoc
@@ -21,6 +22,8 @@ from app.services.llm_generator import LLMGenerator, GenerationResult, StreamChu
 
 if TYPE_CHECKING:
     from app.services.tools.base import ToolResult
+
+_gen_logger = get_logger("rag.orchestrator")
 
 
 @dataclass
@@ -184,15 +187,24 @@ class RAGOrchestrator:
             )
 
             # 流式生成（传入真实检索来源，而非从 LLM 回复无依据提取）
-            async for chunk in self._generator.stream(
-                prompt, "", request_id,
-                sources=[d.source for d in reranked[:5]],
-            ):
-                yield chunk
+            async with asyncio.timeout(self._config.llm_timeout_ms / 1000):
+                async for chunk in self._generator.stream(
+                    prompt, "", request_id,
+                    sources=[d.source for d in reranked[:5]],
+                ):
+                    yield chunk
 
         except asyncio.TimeoutError:
+            _gen_logger.error("RAG stream timeout", extra={
+                "query": query[:100],
+                "intent": intent,
+            })
             yield "[错误] RAG pipeline 超时，请稍后再试"
         except Exception as e:
+            _gen_logger.error("RAG stream error", extra={
+                "query": query[:100],
+                "error": str(e),
+            })
             yield f"[错误] {str(e)}"
 
     async def _timed_rewrite(

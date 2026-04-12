@@ -67,11 +67,11 @@ docker compose up -d --force-recreate backend
 ### 本地运行
 
 ```bash
-# 使用 conda 环境运行后端
-python -m uvicorn backend.app.main:app --reload --port 8000
+# 激活 conda 环境（rag-test）
+conda activate rag-test
 
-# 或指定 conda 环境
-E:\conda_base\envs\rag-test\python.exe -m uvicorn backend.app.main:app --reload --port 8000
+# 运行后端
+uvicorn backend.app.main:app --reload --port 8000
 ```
 
 ### 运行单元测试
@@ -85,6 +85,69 @@ python -m pytest backend/tests/ -v
 ```
 
 **当前测试状态：75 passed**
+
+### WebSocket 实时聊天（2026-04-12）
+
+本次更新添加 WebSocket 双向通信支持，实现流式响应和消息撤回功能。
+
+#### 新增功能
+
+| 功能 | 说明 |
+|------|------|
+| WebSocket 端点 | `ws://localhost:8000/ws/chat?user_id=xxx&session_id=xxx` |
+| 流式响应 | 消息分片实时推送，无需等待完整响应 |
+| 自动重连 | 连接断开后指数退避重连（最大 30s） |
+| 心跳保活 | 30s 间隔 ping/pong 保持连接 |
+| 消息撤回 | 支持删除最后一条消息 |
+
+#### WebSocket 消息协议
+
+```json
+// 客户端发送消息
+{"type": "message", "content": "查询订单", "session_id": "可选"}
+
+// 服务端响应
+{"type": "chunk", "content": "您", "done": false}  // 流式片段
+{"type": "chunk", "content": "好", "done": false}
+...
+{"type": "done", "session_id": "...", "intent": "order_query", "sources": [...]}
+
+// 撤回最后一条消息
+{"type": "delete", "message_id": 0}  // 0 表示删除最后一条
+
+// 撤回响应
+{"type": "message_deleted", "message_id": 123, "success": true}
+```
+
+#### 核心模块
+
+| 文件 | 说明 |
+|------|------|
+| `app/api/ws_manager.py` | 连接管理器（单例模式，session/user 映射） |
+| `app/api/websocket.py` | WebSocket 路由（消息处理/历史/撤回） |
+| `database/message.py` | 新增 `delete()` 消息删除方法 |
+| `services/session_service.py` | 新增 `delete_message()` 会话消息删除 |
+
+#### 架构图
+
+```
+                    ┌─────────────────┐
+                    │  WebSocket     │
+                    │  Connection    │
+                    └───────┬────────┘
+                            │
+         ┌──────────────────┼──────────────────┐
+         ▼                  ▼                  ▼
+   ┌───────────┐    ┌─────────────┐   ┌──────────┐
+   │ Message   │    │   History   │   │  Delete  │
+   │ (流式)    │    │  (查询)      │   │ (撤回)   │
+   └─────┬─────┘    └──────┬──────┘   └────┬─────┘
+         │                 │               │
+         ▼                 ▼               ▼
+   ┌─────────────────────────────────────────┐
+   │        RAGOrchestrator / SessionService │
+   └─────────────────────────────────────────┘
+```
 
 ### 订单查询功能集成（2026-04-06）
 
@@ -191,7 +254,7 @@ RAG/
 │   │   ├── main.py          # FastAPI 入口 + 生命周期管理
 │   │   ├── config.py        # 配置管理（dataclasses + env）
 │   │   ├── models/          # Pydantic 请求/响应模型
-│   │   ├── api/             # API 路由层（chat, intent, health, admin）
+│   │   ├── api/             # API 路由层（chat, intent, health, admin, websocket）
 │   │   ├── services/        # 业务逻辑层
 │   │   │   ├── rag_orchestrator.py  # RAG 管道编排（单入口）
 │   │   │   ├── session_service.py   # 会话管理（MySQL + Redis 双写）
@@ -240,6 +303,9 @@ GET  /api/v1/health/detailed   # 详细状态（熔断器/告警）
 GET  /api/v1/health/alerts      # 告警状态
 GET  /metrics                  # Prometheus 指标
 
+# WebSocket 实时通信
+WS   /ws/chat                 # WebSocket 聊天（流式响应 + 撤回）
+
 # 知识库管理（admin）
 GET    /api/v1/admin/documents          # 文档列表 + 统计
 GET    /api/v1/admin/documents/{id}     # 文档详情（含 content_raw）
@@ -248,6 +314,21 @@ PUT    /api/v1/admin/documents/{id}     # 更新文档 + 重索引
 DELETE /api/v1/admin/documents/{id}     # 软删除文档 + 删除向量
 POST   /api/v1/admin/documents/{id}/reindex  # 重建指定文档索引
 POST   /api/v1/admin/ingest            # 触发知识库摄取
+```
+
+#### WebSocket 测试
+
+```bash
+# 使用 websockets 库测试
+python -c "import websockets, json, asyncio
+async def test():
+    async with websockets.connect('ws://localhost:8000/ws/chat?user_id=test') as ws:
+        await ws.send(json.dumps({'type': 'message', 'content': '你好'}))
+        async for msg in ws:
+            print(msg)
+            if json.loads(msg).get('type') == 'done': break
+asyncio.run(test())
+"
 ```
 
 ## 架构特性

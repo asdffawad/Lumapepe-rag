@@ -57,7 +57,7 @@ class CeleryConfig:
 class RAGConfig:
     top_k: int = 10
     rerank_top_k: int = 5
-    rewrite_timeout_ms: int = 500
+    rewrite_timeout_ms: int = 10000   # 10s，history 增长时需要更长时间
     retrieve_timeout_ms: int = 1000
     rerank_timeout_ms: int = 1000
     llm_timeout_ms: int = int(os.getenv("RAG_LLM_TIMEOUT_MS", "60000"))

@@ -238,7 +238,8 @@ async def handle_message(
             "message": str(e)
         })
     except Exception as e:
-        _logger.error("Message handling error", extra={"error": str(e)})
+        import traceback
+        _logger.error("Message handling error", extra={"error": str(e), "traceback": traceback.format_exc()[:500]})
         await websocket.send_json({
             "type": "error",
             "code": "MESSAGE_ERROR",
