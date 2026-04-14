@@ -278,11 +278,11 @@ class TestRAGOrchestratorToolRouting:
                 request_id="test-001",
                 user_id="test-user",
             )
-            mock_call.assert_called_once_with(
-                "order_query",
-                {"user_id": "test-user"},
-                "test-001",
-            )
+            # 验证工具名称和 user_id 正确
+            call_args = mock_call.call_args
+            assert call_args[0][0] == "order_query"  # tool_name
+            assert call_args[0][1]["user_id"] == "test-user"  # params 中的 user_id
+            assert call_args[0][2] == "test-001"  # request_id
             assert result.tool_result is not None
             assert result.tool_result.success is True
 

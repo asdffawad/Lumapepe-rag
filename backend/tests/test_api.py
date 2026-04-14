@@ -38,7 +38,8 @@ async def test_intent_order_query(client):
 
 
 @pytest.mark.asyncio
-async def test_chat_endpoint(client):
+async def test_chat_endpoint_deprecated(client):
+    """REST /api/v1/chat 已废弃，应返回 410 Gone"""
     response = await client.post(
         "/api/v1/chat",
         json={
@@ -47,50 +48,33 @@ async def test_chat_endpoint(client):
             "session_id": None,
         },
     )
-    assert response.status_code == 200
+    assert response.status_code == 410
     data = response.json()
-    assert "session_id" in data
-    assert "message" in data
-    assert "intent" in data
-    assert data["intent"] == "product_qa"
+    assert data["error"]["code"] == "ENDPOINT_DEPRECATED"
 
 
 @pytest.mark.asyncio
-async def test_chat_with_session(client):
-    # First chat
-    r1 = await client.post(
+async def test_chat_with_session_deprecated(client):
+    """REST /api/v1/chat 已废弃，应返回 410 Gone"""
+    response = await client.post(
         "/api/v1/chat",
         json={"message": "我想买手机", "user_id": "test-user"},
     )
-    session_id = r1.json()["session_id"]
-
-    # Second chat with session
-    r2 = await client.post(
-        "/api/v1/chat",
-        json={
-            "message": "这个有没有5G功能？",
-            "user_id": "test-user",
-            "session_id": session_id,
-        },
-    )
-    assert r2.status_code == 200
-    assert r2.json()["session_id"] == session_id
+    assert response.status_code == 410
+    assert response.json()["error"]["code"] == "ENDPOINT_DEPRECATED"
 
 
 @pytest.mark.asyncio
 async def test_chat_history(client):
-    # Create session and add messages
-    r1 = await client.post(
-        "/api/v1/chat",
-        json={"message": "MacBook 价格", "user_id": "test-user"},
-    )
-    session_id = r1.json()["session_id"]
-
-    # Get history
-    r2 = await client.get(f"/api/v1/chat/history/{session_id}")
-    assert r2.status_code == 200
-    data = r2.json()
-    assert data["session_id"] == session_id
+    """REST /api/v1/chat 已废弃，但 /api/v1/chat/history 仍然可用"""
+    # 先通过 WebSocket 创建会话（这里无法测试），直接测试 history 端点
+    import uuid
+    fake_session_id = str(uuid.uuid4())
+    response = await client.get(f"/api/v1/chat/history/{fake_session_id}")
+    # 存在会话返回历史，不存在返回空列表
+    assert response.status_code == 200
+    data = response.json()
+    assert data["session_id"] == fake_session_id
     assert "history" in data
 
 

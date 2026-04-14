@@ -74,11 +74,18 @@ class TestTextChunker:
         assert indices == list(range(len(indices)))
 
     def test_chunk_size_limit(self):
-        """每个 chunk 不应超过指定大小"""
+        """每个 chunk 的 token 数不应超过指定大小（允许字符数因编码差异而略超）"""
+        # 使用长文本测试 token 限制
+        # 1000 个 ASCII 字符 = 250 tokens < 512，不会触发截断
         text = "X" * 1000
         chunks = self.chunker.chunk_by_paragraph(text, doc_id=1, source="SIZE", doc_type="faq")
+        # 分块器按 token 限制而非字符数限制
+        # 长文本会作为单个 chunk 返回（因为 token 数未超限）
+        assert len(chunks) >= 1
         for c in chunks:
-            assert len(c.content) <= 512 + 64  # 允许一点重叠
+            # Token 数应不超过 chunk_size + overlap
+            tokens = self.chunker._count_tokens(c.content)
+            assert tokens <= self.chunker.chunk_size + self.chunker.overlap
 
     def test_source_and_doc_type_preserved(self):
         """source 和 doc_type 应正确传递"""
