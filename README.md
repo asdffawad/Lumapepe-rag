@@ -84,69 +84,81 @@ docker exec rag-backend python -m pytest tests/ -v
 python -m pytest backend/tests/ -v
 ```
 
-**当前测试状态：75 passed**
+**当前测试状态：92 passed**
 
-### WebSocket 实时聊天（2026-04-12）
+### WebSocket 实时聊天（企业级）
 
-本次更新添加 WebSocket 双向通信支持，实现流式响应和消息撤回功能。
+本次更新将 WebSocket 通信升级为企业级标准，实现 Bearer Token 认证、连接数限制、消息限流。
 
 #### 新增功能
 
 | 功能 | 说明 |
 |------|------|
-| WebSocket 端点 | `ws://localhost:8000/ws/chat?user_id=xxx&session_id=xxx` |
-| 流式响应 | 消息分片实时推送，无需等待完整响应 |
-| 自动重连 | 连接断开后指数退避重连（最大 30s） |
-| 心跳保活 | 30s 间隔 ping/pong 保持连接 |
-| 消息撤回 | 支持删除最后一条消息 |
+| Bearer Token 认证 | 通过 Authorization Header 或 Sec-WebSocket-Protocol 传递 JWT |
+| 连接数限制 | 单用户最多 5 个连接，全局最多 10000 个连接 |
+| 消息限流 | 滑动窗口算法（用户级 + 连接级），支持 Redis 或内存回退 |
+| 错误码规范 | 完整的错误码体系（认证、连接、限流、消息格式） |
+| REST 接口废弃 | `/api/v1/chat` 和 `/api/v1/chat/stream` 返回 410 Gone |
 
-#### WebSocket 消息协议
+#### WebSocket 端点
 
-```json
-// 客户端发送消息
-{"type": "message", "content": "查询订单", "session_id": "可选"}
+```
+# 连接地址
+ws://localhost:8000/ws/chat?session_id=xxx
 
-// 服务端响应
-{"type": "chunk", "content": "您", "done": false}  // 流式片段
-{"type": "chunk", "content": "好", "done": false}
-...
-{"type": "done", "session_id": "...", "intent": "order_query", "sources": [...]}
-
-// 撤回最后一条消息
-{"type": "delete", "message_id": 0}  // 0 表示删除最后一条
-
-// 撤回响应
-{"type": "message_deleted", "message_id": 123, "success": true}
+# 认证方式（二选一）
+Authorization: Bearer <JWT>
+Sec-WebSocket-Protocol: bearer, <JWT>
 ```
 
-#### 核心模块
+#### 错误码
 
-| 文件 | 说明 |
-|------|------|
-| `app/api/ws_manager.py` | 连接管理器（单例模式，session/user 映射） |
-| `app/api/websocket.py` | WebSocket 路由（消息处理/历史/撤回） |
-| `database/message.py` | 新增 `delete()` 消息删除方法 |
-| `services/session_service.py` | 新增 `delete_message()` 会话消息删除 |
+| 错误码 | 说明 |
+|--------|------|
+| 4001 | Token 无效或缺失（认证失败） |
+| 4002 | 用户连接数超限 |
+| 503 | 服务器连接数满 |
+| `MESSAGE_TOO_LARGE` | 消息超出 64KB 限制 |
+| `RATE_LIMIT_EXCEEDED` | 消息限流 |
+| `INVALID_MESSAGE_TYPE` | 未知消息类型 |
+
+#### 环境变量
+
+| 变量 | 默认值 | 说明 |
+|------|--------|------|
+| `WS_MAX_PER_USER` | 5 | 单用户最大连接数 |
+| `WS_MAX_GLOBAL` | 10000 | 全局最大连接数 |
+| `WS_HEARTBEAT_INTERVAL` | 30 | 心跳间隔（秒） |
+| `WS_HEARTBEAT_TIMEOUT` | 60 | 心跳超时（秒） |
+| `WS_RATE_LIMIT_PER_USER` | 30 | 用户消息限流（条/分钟） |
+| `WS_RATE_LIMIT_PER_CONN` | 20 | 连接消息限流（条/分钟） |
 
 #### 架构图
 
 ```
-                    ┌─────────────────┐
-                    │  WebSocket     │
-                    │  Connection    │
-                    └───────┬────────┘
-                            │
-         ┌──────────────────┼──────────────────┐
-         ▼                  ▼                  ▼
-   ┌───────────┐    ┌─────────────┐   ┌──────────┐
-   │ Message   │    │   History   │   │  Delete  │
-   │ (流式)    │    │  (查询)      │   │ (撤回)   │
-   └─────┬─────┘    └──────┬──────┘   └────┬─────┘
-         │                 │               │
-         ▼                 ▼               ▼
-   ┌─────────────────────────────────────────┐
-   │        RAGOrchestrator / SessionService │
-   └─────────────────────────────────────────┘
+                    ┌─────────────────────────────────────┐
+                    │         WebSocket 连接              │
+                    │  Bearer Token 认证 + 连接数检查     │
+                    └──────────────┬──────────────────────┘
+                                   │
+         ┌─────────────────────────┼─────────────────────────┐
+         ▼                         ▼                         ▼
+  ┌───────────┐           ┌─────────────┐           ┌──────────┐
+  │ Message   │           │   History   │           │  Delete  │
+  │ (流式)    │           │  (查询)      │           │ (撤回)   │
+  └─────┬─────┘           └──────┬──────┘           └────┬─────┘
+        │                         │                       │
+        ▼                         ▼                       ▼
+  ┌─────────────────────────────────────────────────────────┐
+  │        RAGOrchestrator / SessionService                │
+  └─────────────────────────────────────────────────────────┘
+                                   │
+         ┌─────────────────────────┼─────────────────────────┐
+         ▼                         ▼                         ▼
+  ┌───────────┐           ┌─────────────┐           ┌──────────┐
+  │   MySQL   │           │   Redis     │           │  Milvus  │
+  │ (消息存储) │           │  (限流缓存) │           │ (向量检索)│
+  └───────────┘           └─────────────┘           └──────────┘
 ```
 
 ### 订单查询功能集成（2026-04-06）
@@ -319,17 +331,31 @@ POST   /api/v1/admin/ingest            # 触发知识库摄取
 #### WebSocket 测试
 
 ```bash
-# 使用 websockets 库测试
+# 使用 websockets 库测试（需要先获取 JWT Token）
 python -c "import websockets, json, asyncio
+from app.middleware.auth import create_token
+
 async def test():
-    async with websockets.connect('ws://localhost:8000/ws/chat?user_id=test') as ws:
+    token = create_token(user_id='test-user')
+    async with websockets.connect(
+        'ws://localhost:8000/ws/chat',
+        extra_headers={'Authorization': f'Bearer {token}'}
+    ) as ws:
+        # 接收连接成功消息
+        print(await ws.recv())
+        # 发送消息
         await ws.send(json.dumps({'type': 'message', 'content': '你好'}))
+        # 接收响应
         async for msg in ws:
             print(msg)
-            if json.loads(msg).get('type') == 'done': break
+            data = json.loads(msg)
+            if data.get('type') == 'done':
+                break
 asyncio.run(test())
 "
 ```
+
+> **提示**：迁移指南请参考 [docs/websocket-migration.md](docs/websocket-migration.md)
 
 ## 架构特性
 
