@@ -69,6 +69,15 @@ class InMemorySessionService:
 _inmemory_svc = InMemorySessionService()
 
 
+@pytest.fixture
+def reset_ws_manager_fixture():
+    """每个测试前后重置 WebSocket 连接管理器（用于其他测试模块）"""
+    from app.api.ws_manager import reset_connection_manager
+    reset_connection_manager()
+    yield
+    reset_connection_manager()
+
+
 @pytest_asyncio.fixture
 async def client():
     from app.main import app

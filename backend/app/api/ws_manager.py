@@ -79,14 +79,17 @@ class SlidingWindowLimiter:
         # 内存回退
         return self._memory_fallback(key, now, window_start)
 
-    def _memory_fallback(self, key: str, now: float, window_start: float) -> int:
+    def _memory_fallback(self, key: str, now: float, window_start: float) -> tuple[bool, int]:
         """内存滑动窗口回退"""
         timestamps = self._memory[key]
         # 清理过期时间戳
         self._memory[key] = [ts for ts in timestamps if ts > window_start]
         # 添加当前请求
         self._memory[key].append(now)
-        return len(self._memory[key])
+        count = len(self._memory[key])
+        allowed = count <= self._max
+        remaining = max(0, self._max - count)
+        return allowed, remaining
 
 
 class ConnectionManager:
