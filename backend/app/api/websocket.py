@@ -22,6 +22,9 @@ from app.logging_config import get_logger
 router = APIRouter(tags=["websocket"])
 _logger = get_logger("websocket")
 
+# WebSocket 消息最大大小 (1MB)
+MAX_MESSAGE_SIZE = 1024 * 1024
+
 
 def get_rag_orchestrator() -> RAGOrchestrator:
     from app.main import app as _app
@@ -58,13 +61,26 @@ async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query
       - session_id: 会话ID (可选，不提供则自动创建)
     """
     from app.middleware.auth import JWTError, verify_ws_token
+    from app.logging_config import get_logger
+    _ws_logger = get_logger("websocket.debug")
 
     # 1. 认证
     headers = dict(websocket.headers)
+    auth_header = headers.get("Authorization") or headers.get("authorization") or ""
+    _ws_logger.info("WebSocket handshake start", extra={
+        "path": str(websocket.url),
+        "has_auth_header": bool(auth_header),
+        "auth_header_preview": auth_header[:30] if auth_header else "none",
+    })
     try:
         auth_user = await verify_ws_token(headers)
         user_id = auth_user.user_id
+        _ws_logger.info("Token verified successfully", extra={"user_id": user_id})
     except JWTError as e:
+        _ws_logger.error("Token verification failed", extra={
+            "error": str(e),
+            "auth_header_preview": auth_header[:30] if auth_header else "none",
+        })
         await websocket.close(code=4001, reason=str(e))
         return
 
@@ -74,9 +90,10 @@ async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query
     # 3. 连接管理
     manager = get_connection_manager()
 
-    # 检查消息大小限制
-    max_size = manager._max_message_size if hasattr(manager, '_max_message_size') else 65536
-    websocket.accept(max_size=max_size)
+    _ws_logger.info("Attempting to accept WebSocket")
+    # WebSocket.accept() 是 async 函数，必须 await
+    await websocket.accept()
+    _ws_logger.info("WebSocket accepted successfully")
 
     # 4. 建立连接（检查连接数限制）
     success, error_code, error_msg = await manager.connect(websocket, session_id, user_id)
@@ -101,11 +118,11 @@ async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query
 
             # 消息大小检查
             data_str = json.dumps(data) if isinstance(data, dict) else str(data)
-            if len(data_str.encode()) > max_size:
+            if len(data_str.encode()) > MAX_MESSAGE_SIZE:
                 await websocket.send_json({
                     "type": "error",
                     "code": "MESSAGE_TOO_LARGE",
-                    "message": f"消息超出 {max_size} 字节限制",
+                    "message": f"消息超出 {MAX_MESSAGE_SIZE} 字节限制",
                     "retry_after": 0,
                 })
                 continue
@@ -123,7 +140,8 @@ async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query
                 })
                 continue
 
-            if msg_type == "message":
+            # 兼容 "chat" 和 "message" 两种消息类型
+            if msg_type in ("message", "chat"):
                 await handle_message(
                     websocket=websocket,
                     session_id=session_id,

@@ -223,6 +223,11 @@ class ConnectionManager:
 
         # 在锁内完成 accept 和注册（防止竞态条件）
         async with self._lock:
+            _logger.info("WS Manager connect called", extra={
+                "session_id": session_id,
+                "user_id": user_id,
+                "global_count": self._global_count,
+            })
             # 再次检查（乐观锁模式）
             if self._global_count >= self._max_global:
                 return False, "SERVER_FULL", "服务器连接数已满，请稍后重试"
@@ -230,7 +235,8 @@ class ConnectionManager:
             if user_conn_count >= self._max_per_user:
                 return False, "TOO_MANY_CONNECTIONS", f"用户连接数超限（最大 {self._max_per_user} 个），请关闭其他连接后重试"
 
-            await websocket.accept()
+            # 注意: websocket.accept() 已在 websocket.py 中调用，这里不需要重复调用
+            # 重复调用 accept() 会导致 500 错误
 
             info = ConnectionInfo(
                 websocket=websocket,
