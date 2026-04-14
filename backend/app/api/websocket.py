@@ -91,12 +91,13 @@ async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query
         "user_id": user_id,
     })
 
-    request_id = str(uuid.uuid4())
-
     try:
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
+
+            # 每次处理消息时生成新的 request_id
+            request_id = str(uuid.uuid4())
 
             # 消息大小检查
             data_str = json.dumps(data) if isinstance(data, dict) else str(data)
@@ -262,21 +263,30 @@ async def handle_message(
                     accumulated += chunk_obj
         
         # 流结束后，保存消息
-        await session_svc.add_message(
-            session_id=ctx.session_id,
-            role="user",
-            content=content,
-            intent=intent,
-        )
-        await session_svc.add_message(
-            session_id=ctx.session_id,
-            role="assistant",
-            content=accumulated,
-            intent=intent,
-            sources={"sources": list(set(final_citations))} if final_citations else None,
-        )
-        await session_svc.update_session(ctx.session_id, intent=intent)
-        
+        try:
+            await session_svc.add_message(
+                session_id=ctx.session_id,
+                role="user",
+                content=content,
+                intent=intent,
+            )
+            await session_svc.add_message(
+                session_id=ctx.session_id,
+                role="assistant",
+                content=accumulated,
+                intent=intent,
+                sources={"sources": list(set(final_citations))} if final_citations else None,
+            )
+            await session_svc.update_session(ctx.session_id, intent=intent)
+        except Exception as e:
+            _logger.error(f"Failed to save message: {e}", extra={"session_id": session_id})
+            await websocket.send_json({
+                "type": "error",
+                "code": "SAVE_ERROR",
+                "message": "保存消息失败"
+            })
+            return  # 提前返回，不再发送 done 消息
+
         # 发送完成消息
         await websocket.send_json({
             "type": "done",
