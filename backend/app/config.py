@@ -78,6 +78,18 @@ class RateLimitConfig:
 
 
 @dataclass
+class WebSocketConfig:
+    max_per_user: int = 5           # 单用户最大连接数
+    max_global: int = 10000         # 全局最大连接数
+    heartbeat_interval: int = 30    # 心跳间隔（秒）
+    heartbeat_timeout: int = 60     # 心跳超时（秒）
+    rate_limit_per_user: int = 30   # 用户消息限流（条/分钟）
+    rate_limit_per_conn: int = 20   # 连接消息限流（条/分钟）
+    rate_limit_window: int = 60     # 限流窗口（秒）
+    max_message_size: int = 65536   # 单条消息最大字节数（64KB）
+
+
+@dataclass
 class IngestConfig:
     auto_ingest: bool = False
     data_dir: str = "data"
@@ -96,6 +108,7 @@ class AppConfig:
     celery: CeleryConfig = field(default_factory=CeleryConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
+    websocket: WebSocketConfig = field(default_factory=WebSocketConfig)
     ingest: IngestConfig = field(default_factory=IngestConfig)
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
     debug: bool = False
@@ -156,6 +169,16 @@ def get_config() -> AppConfig:
             global_limit=int(os.getenv("RATE_LIMIT_GLOBAL", "200")),
             user_limit=int(os.getenv("RATE_LIMIT_USER", "60")),
             window=int(os.getenv("RATE_LIMIT_WINDOW", "60")),
+        ),
+        websocket=WebSocketConfig(
+            max_per_user=int(os.getenv("WS_MAX_PER_USER", "5")),
+            max_global=int(os.getenv("WS_MAX_GLOBAL", "10000")),
+            heartbeat_interval=int(os.getenv("WS_HEARTBEAT_INTERVAL", "30")),
+            heartbeat_timeout=int(os.getenv("WS_HEARTBEAT_TIMEOUT", "60")),
+            rate_limit_per_user=int(os.getenv("WS_RATE_LIMIT_PER_USER", "30")),
+            rate_limit_per_conn=int(os.getenv("WS_RATE_LIMIT_PER_CONN", "20")),
+            rate_limit_window=int(os.getenv("WS_RATE_LIMIT_WINDOW", "60")),
+            max_message_size=int(os.getenv("WS_MAX_MESSAGE_SIZE", "65536")),
         ),
         ingest=IngestConfig(
             auto_ingest=_str_to_bool(os.getenv("AUTO_INGEST", "false")),
