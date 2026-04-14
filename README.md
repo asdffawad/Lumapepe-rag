@@ -84,7 +84,7 @@ docker exec rag-backend python -m pytest tests/ -v
 python -m pytest backend/tests/ -v
 ```
 
-**当前测试状态：92 passed**
+**当前测试状态：129 passed**
 
 ### WebSocket 实时聊天（企业级）
 
