@@ -27,15 +27,15 @@ def clean_ws_manager():
 class TestSlidingWindowLimiter:
     """测试滑动窗口限流器"""
 
-    def test_memory_fallback_returns_count(self):
-        """测试内存回退返回请求计数"""
+    def test_memory_limiter_allows(self):
+        """测试内存限流器允许请求"""
         limiter = SlidingWindowLimiter(max_requests=10, window_seconds=60)
         allowed, remaining = limiter._memory_fallback("test-key", 1000.0, 940.0)
         assert allowed is True
         assert remaining == 9
         assert len(limiter._memory["test-key"]) == 1
 
-    def test_memory_fallback_blocks_when_full(self):
+    def test_memory_limiter_blocks(self):
         """测试内存回退超限时拒绝"""
         limiter = SlidingWindowLimiter(max_requests=2, window_seconds=60)
         
@@ -84,7 +84,7 @@ class TestConnectionManager:
         return MockWSConfig()
 
     @pytest.mark.asyncio
-    async def test_check_connection_limits_allows(self, mock_config):
+    async def test_check_connection_limits(self, mock_config):
         """测试连接限制允许新连接"""
         manager = get_connection_manager(mock_config)
 
@@ -179,7 +179,7 @@ class TestConnectionManager:
         assert manager.get_user_count("user-1") == 0
 
     @pytest.mark.asyncio
-    async def test_send_json_success(self, mock_config):
+    async def test_send_json(self, mock_config):
         """测试发送 JSON 消息成功"""
         manager = get_connection_manager(mock_config)
 
@@ -204,7 +204,7 @@ class TestConnectionManager:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_broadcast_to_user(self, mock_config):
+    async def test_broadcast(self, mock_config):
         """测试向用户广播消息"""
         manager = get_connection_manager(mock_config)
 
@@ -278,14 +278,22 @@ class TestConnectionManager:
         await manager.disconnect("session-2")
 
     @pytest.mark.asyncio
-    async def test_check_rate_limit_returns_tuple(self, mock_config):
-        """测试限流检查返回正确的元组"""
+    async def test_rate_limit(self, mock_config):
+        """测试限流检查：前2个请求通过，第3个被限流"""
+        # 修改限流配置为小值以便测试限流
+        mock_config.rate_limit_per_user = 2
+        ConnectionManager._instance = None
+        reset_connection_manager()
         manager = get_connection_manager(mock_config)
 
-        # 初始检查应该返回 3 个值
-        result = await manager.check_rate_limit("user-1", "session-1")
-        assert len(result) == 3
-        allowed, user_remaining, conn_remaining = result
-        assert isinstance(allowed, bool)
-        assert isinstance(user_remaining, int)
-        assert isinstance(conn_remaining, int)
+        # 第1个请求应该通过
+        allowed1, user_remaining1, conn_remaining1 = await manager.check_rate_limit("user-1", "session-1")
+        assert allowed1 is True
+
+        # 第2个请求应该通过
+        allowed2, user_remaining2, conn_remaining2 = await manager.check_rate_limit("user-1", "session-2")
+        assert allowed2 is True
+
+        # 第3个请求应该被限流
+        allowed3, user_remaining3, conn_remaining3 = await manager.check_rate_limit("user-1", "session-3")
+        assert allowed3 is False
