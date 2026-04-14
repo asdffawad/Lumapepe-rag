@@ -2,6 +2,7 @@
 Debug API 路由
 POST /api/v1/debug/retrieve — 分阶段检索调试
 GET  /api/v1/debug/embed   — Embedding 测试
+POST /api/v1/debug/auth/token — 获取测试用 JWT Token（仅用于测试环境）
 """
 from __future__ import annotations
 
@@ -14,6 +15,7 @@ from pydantic import BaseModel, Field
 
 from app.logging_config import get_logger
 from app.config import get_config
+from app.middleware.auth import create_token
 from app.services.vector_retriever import SimpleVectorRetriever, HybridRetriever, RetrievedDoc
 from app.services.reranker import MMRReranker, RerankedDoc
 from app.services.llm_generator import StandardLLMGenerator
@@ -327,13 +329,9 @@ async def debug_retrieve(request: RetrieveRequest):
             )
             dense_ms = (time.monotonic() - t0) * 1000
 
-            # 注入 dense_rank
-            sorted_dense = sorted(enumerate(dense_docs), key=lambda x: x[1].score, reverse=True)
-            dense_rank_map = {idx: rank for rank, idx in sorted_dense}
-
             dense_items = []
             for idx, doc in enumerate(dense_docs):
-                meta = doc.metadata
+                meta = doc.metadata.copy() if doc.metadata else {}
                 hierarchy_val = meta.get("hierarchy", {})
                 if isinstance(hierarchy_val, dict):
                     hierarchy_str = " > ".join(
@@ -353,8 +351,8 @@ async def debug_retrieve(request: RetrieveRequest):
                         source=doc.source,
                     )
                 )
-                # 注入 dense_rank 到 metadata
-                doc.metadata["dense_rank"] = dense_rank_map[idx]
+                # 注入 dense_rank 到 metadata（使用索引避免对不可哈希对象排序）
+                meta["dense_rank"] = idx
 
             dense_stage = StageDense(count=len(dense_items), items=dense_items, duration_ms=dense_ms)
         except Exception as e:
@@ -609,3 +607,39 @@ async def debug_embed(text: str = Query(..., description="待测试文本")):
         vector_preview=vector_preview,
         latency_ms=latency_ms,
     )
+
+
+# ---------------------------------------------------------------------------
+# Endpoint: POST /api/v1/debug/auth/token
+# ---------------------------------------------------------------------------
+class TokenRequest(BaseModel):
+    user_id: str = Field(..., description="用户ID")
+    role: str = Field(default="user", description="用户角色")
+
+
+class TokenResponse(BaseModel):
+    token: str
+    expires_in: int = 86400
+
+
+@router.post("/auth/token", response_model=TokenResponse)
+async def create_test_token(request: TokenRequest):
+    """
+    生成测试用 JWT Token（仅用于测试环境）
+
+    用于前端 WebSocket 连接认证。
+    生产环境应使用真实的登录流程。
+    """
+    import os
+
+    # 仅在测试环境允许此接口
+    env = os.getenv("APP_ENV", "development")
+    if env == "production":
+        return {"error": "Not available in production"}, 403
+
+    token = create_token(
+        user_id=request.user_id,
+        role=request.role,
+        ttl_seconds=86400  # 24小时
+    )
+    return TokenResponse(token=token)

@@ -18,6 +18,7 @@ from app.services.intent_service import IntentClassifier
 from app.services.session_service import SessionService
 from app.services.llm_generator import StreamChunk
 from app.logging_config import get_logger
+from app.middleware.auth import decode_token
 
 router = APIRouter(tags=["websocket"])
 _logger = get_logger("websocket")
@@ -64,7 +65,7 @@ async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query
     from app.logging_config import get_logger
     _ws_logger = get_logger("websocket.debug")
 
-    # 1. 认证
+    # 1. 认证（支持多种方式）
     headers = dict(websocket.headers)
     auth_header = headers.get("Authorization") or headers.get("authorization") or ""
     _ws_logger.info("WebSocket handshake start", extra={
@@ -73,7 +74,32 @@ async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query
         "auth_header_preview": auth_header[:30] if auth_header else "none",
     })
     try:
-        auth_user = await verify_ws_token(headers)
+        auth_user = None
+        # 优先从 Authorization header 获取
+        auth_header = headers.get("Authorization") or headers.get("authorization") or ""
+        if auth_header.startswith("Bearer "):
+            token = auth_header[7:]
+        else:
+            token = None
+        _ws_logger.info("Token extraction from headers", extra={
+            "token_present": bool(token),
+            "token_preview": token[:30] + "..." if token else "none",
+        })
+        if token:
+            auth_user = decode_token(token)
+        # 如果 header 方式失败，尝试从 URL query string 获取 token
+        if not auth_user:
+            token_from_query = websocket.query_params.get("token")
+            _ws_logger.info("Token from query params", extra={
+                "query_params_keys": list(websocket.query_params.keys()),
+                "token_from_query_present": bool(token_from_query),
+                "token_from_query_preview": token_from_query[:30] + "..." if token_from_query else "none",
+            })
+            if token_from_query:
+                auth_user = decode_token(token_from_query)
+                _ws_logger.info("Token verified via URL query", extra={"user_id": auth_user.user_id})
+        if not auth_user:
+            raise JWTError("Missing authorization token")
         user_id = auth_user.user_id
         _ws_logger.info("Token verified successfully", extra={"user_id": user_id})
     except JWTError as e:
@@ -107,11 +133,21 @@ async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query
         "session_id": session_id,
         "user_id": user_id,
     })
+    _ws_logger.info("Connection established and 'connected' message sent",
+                    extra={"session_id": session_id, "user_id": user_id})
 
     try:
         while True:
-            data = await websocket.receive_json()
+            _ws_logger.info("Waiting for message...")
+            try:
+                data = await websocket.receive_json()
+            except Exception as e:
+                _ws_logger.error(f"receive_json EXCEPTION: {type(e).__name__}: {e}", exc_info=True)
+                raise
             msg_type = data.get("type")
+
+            # 调试日志
+            _ws_logger.info(f"Received message: type={msg_type}, data={data}")
 
             # 每次处理消息时生成新的 request_id
             request_id = str(uuid.uuid4())
@@ -160,7 +196,25 @@ async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query
                 )
 
             elif msg_type == "ping":
-                await websocket.send_json({"type": "pong"})
+                import time
+                client_timestamp = data.get("timestamp")
+                server_timestamp = int(time.time() * 1000)
+                _ws_logger.debug(f"PING received: client_timestamp={client_timestamp}")
+                await websocket.send_json({
+                    "type": "pong",
+                    "timestamp": client_timestamp,  # 回显客户端时间戳
+                    "server_time": server_timestamp  # 服务器当前时间
+                })
+                _ws_logger.debug(f"PONG sent: server_time={server_timestamp}")
+
+            elif msg_type == "pong":
+                # 收到客户端的 pong 响应，更新最后活动时间
+                _ws_logger.debug(f"PONG received from client")
+                # 通过 ConnectionManager 更新该连接的最后活动时间
+                try:
+                    await manager.update_activity(session_id)
+                except Exception as e:
+                    _ws_logger.warning(f"Failed to update activity: {e}")
 
             elif msg_type == "delete":
                 await handle_delete_message(

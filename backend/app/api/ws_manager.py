@@ -247,6 +247,7 @@ class ConnectionManager:
             self._session_users[session_id] = user_id
             self._user_sessions[user_id].add(session_id)
             self._global_count += 1
+            _logger.info(f"Connection registered: {session_id}, initial last_activity={info.last_activity}")
 
         _logger.info(
             "WebSocket connected",
@@ -342,27 +343,59 @@ class ConnectionManager:
         for session_id in list(self._connections.keys()):
             await self.send_json(session_id, shutdown_msg)
 
+    async def update_activity(self, session_id: str) -> bool:
+        """
+        更新连接的最后活动时间
+
+        Args:
+            session_id: 会话 ID
+
+        Returns:
+            是否成功更新
+        """
+        async with self._lock:
+            info = self._connections.get(session_id)
+            if info:
+                old_time = info.last_activity
+                info.last_activity = time.time()
+                _logger.debug(f"Activity updated for {session_id}: {old_time:.3f} -> {info.last_activity:.3f}")
+                return True
+            _logger.warning(f"update_activity failed: session {session_id} not found")
+            return False
+
     async def _heartbeat_loop(self) -> None:
         """心跳保活循环"""
+        _logger.info(f"Heartbeat loop started, interval={self._heartbeat_interval}s")
         while True:
             await asyncio.sleep(self._heartbeat_interval)
             now = time.time()
             dead_sessions = []
 
             async with self._lock:
+                active_count = len(self._connections)
+                _logger.info(f"Heartbeat tick: checking {active_count} connections, timeout={self._heartbeat_timeout}s")
+
                 for session_id, info in list(self._connections.items()):
-                    if now - info.last_activity > self._heartbeat_timeout:
+                    elapsed = now - info.last_activity
+                    _logger.debug(f"Session {session_id}: last_activity={info.last_activity}, elapsed={elapsed:.1f}s")
+                    if elapsed > self._heartbeat_timeout:
+                        _logger.info(f"Session timeout: {session_id}, elapsed={elapsed:.1f}s > {self._heartbeat_timeout}s")
                         dead_sessions.append(session_id)
                     else:
                         try:
                             await info.websocket.send_json({"type": "ping"})
-                        except Exception:
+                            # 发送 ping 后更新最后活动时间，防止被误判为死连接
+                            info.last_activity = now
+                            _logger.debug(f"Sent heartbeat ping to {session_id}, updated last_activity to {now}")
+                        except Exception as e:
+                            _logger.warning(f"Heartbeat send failed for {session_id}: {e}")
                             dead_sessions.append(session_id)
 
             for session_id in dead_sessions:
                 await self.disconnect(session_id)
 
             if not self._connections:
+                _logger.info("All connections gone, heartbeat loop ending")
                 break
 
 

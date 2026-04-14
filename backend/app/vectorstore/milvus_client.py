@@ -175,6 +175,10 @@ class MilvusClient:
         if not filters:
             return None
 
+        # 支持预构建的表达式（直接使用）
+        if "expr" in filters:
+            return str(filters["expr"])
+
         expr_parts = []
         for key, value in filters.items():
             if isinstance(value, str):
