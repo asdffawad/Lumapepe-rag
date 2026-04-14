@@ -4,6 +4,7 @@ WebSocket 聊天路由
 """
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Optional
 
@@ -43,30 +44,84 @@ async def get_session_service() -> SessionService | None:
 
 
 @router.websocket("/ws/chat")
-async def websocket_chat(
-    websocket: WebSocket,
-    session_id: Optional[str] = Query(None, description="会话ID，不提供则自动创建"),
-    user_id: str = Query(..., description="用户ID（必需）"),
-):
+async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query(None)):
     """
-    WebSocket 聊天端点
-    
-    连接后可以发送以下消息:
-    - {"type": "message", "content": "...", "session_id": "可选"}
-    - {"type": "history", "limit": 20}
-    - {"type": "ping"}
+    WebSocket 聊天端点（企业级）
+
+    认证：使用 Authorization Header 或 Sec-WebSocket-Protocol
+    Headers:
+      Authorization: Bearer <JWT>
+      或
+      Sec-WebSocket-Protocol: bearer, <JWT>
+
+    Query 参数:
+      - session_id: 会话ID (可选，不提供则自动创建)
     """
-    manager = get_connection_manager()
+    from app.middleware.auth import JWTError, verify_ws_token
+
+    # 1. 认证
+    headers = dict(websocket.headers)
+    try:
+        auth_user = await verify_ws_token(headers)
+        user_id = auth_user.user_id
+    except JWTError as e:
+        await websocket.close(code=4001, reason=str(e))
+        return
+
+    # 2. 生成或使用 session_id
     session_id = session_id or str(uuid.uuid4())
-    
-    await manager.connect(websocket, session_id, user_id)
+
+    # 3. 连接管理
+    manager = get_connection_manager()
+
+    # 检查消息大小限制
+    max_size = manager._max_message_size if hasattr(manager, '_max_message_size') else 65536
+    websocket.accept(max_size=max_size)
+
+    # 4. 建立连接（检查连接数限制）
+    success, error_code, error_msg = await manager.connect(websocket, session_id, user_id)
+    if not success:
+        await websocket.close(code=4002 if error_code == "TOO_MANY_CONNECTIONS" else 503, reason=error_msg)
+        return
+
+    # 5. 发送连接成功消息
+    await websocket.send_json({
+        "type": "connected",
+        "session_id": session_id,
+        "user_id": user_id,
+    })
+
     request_id = str(uuid.uuid4())
-    
+
     try:
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
-            
+
+            # 消息大小检查
+            data_str = json.dumps(data) if isinstance(data, dict) else str(data)
+            if len(data_str.encode()) > max_size:
+                await websocket.send_json({
+                    "type": "error",
+                    "code": "MESSAGE_TOO_LARGE",
+                    "message": f"消息超出 {max_size} 字节限制",
+                    "retry_after": 0,
+                })
+                continue
+
+            # 限流检查
+            allowed, user_remaining, conn_remaining = await manager.check_rate_limit(user_id, session_id)
+            if not allowed:
+                await websocket.send_json({
+                    "type": "error",
+                    "code": "RATE_LIMIT_EXCEEDED",
+                    "message": "请求过于频繁，请稍后重试",
+                    "retry_after": 5,
+                    "user_remaining": user_remaining,
+                    "conn_remaining": conn_remaining,
+                })
+                continue
+
             if msg_type == "message":
                 await handle_message(
                     websocket=websocket,
@@ -76,7 +131,7 @@ async def websocket_chat(
                     provided_session_id=data.get("session_id"),
                     request_id=request_id,
                 )
-            
+
             elif msg_type == "history":
                 await handle_history(
                     websocket=websocket,
@@ -84,7 +139,7 @@ async def websocket_chat(
                     user_id=user_id,
                     limit=data.get("limit", 20),
                 )
-            
+
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
 
@@ -95,26 +150,26 @@ async def websocket_chat(
                     user_id=user_id,
                     message_id=data.get("message_id"),
                 )
-            
+
             else:
                 await websocket.send_json({
                     "type": "error",
-                    "code": "UNKNOWN_MESSAGE_TYPE",
+                    "code": "INVALID_MESSAGE_TYPE",
                     "message": f"未知的消息类型: {msg_type}"
                 })
-    
+
     except WebSocketDisconnect:
-        _logger.info("Client disconnected", extra={"session_id": session_id})
+        _logger.info("Client disconnected", extra={"session_id": session_id, "user_id": user_id})
     except Exception as e:
         _logger.error(
             "WebSocket error",
-            extra={"session_id": session_id, "error": str(e)}
+            extra={"session_id": session_id, "user_id": user_id, "error": str(e)}
         )
         try:
             await websocket.send_json({
                 "type": "error",
                 "code": "INTERNAL_ERROR",
-                "message": str(e)
+                "message": "服务器内部错误"
             })
         except Exception:
             pass
