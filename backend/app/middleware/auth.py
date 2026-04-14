@@ -301,3 +301,50 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         except Exception:
             # Redis 不可用时，放行请求（不阻断服务）
             return await call_next(request)
+
+
+# ---------------------------------------------------------------------------
+# WebSocket 认证
+# ---------------------------------------------------------------------------
+
+
+def extract_bearer_from_headers(headers: dict) -> str | None:
+    """
+    从 WebSocket headers 中提取 Bearer Token
+
+    支持两种方式：
+    1. Authorization: Bearer <token>
+    2. Sec-WebSocket-Protocol: bearer, <token>
+
+    Returns:
+        Token 字符串，如果不存在返回 None
+    """
+    # 方式1: Authorization Header
+    auth = headers.get("authorization", "") or headers.get("Authorization", "")
+    if auth.startswith("Bearer "):
+        return auth[7:].strip()
+    if auth.startswith("bearer "):
+        return auth[7:].strip()
+
+    # 方式2: Sec-WebSocket-Protocol
+    protocol = headers.get("sec-websocket-protocol", "") or headers.get("Sec-WebSocket-Protocol", "")
+    if protocol.startswith("bearer,"):
+        return protocol[7:].strip()
+    if protocol.startswith("bearer "):
+        return protocol[7:].strip()
+
+    return None
+
+
+async def verify_ws_token(headers: dict) -> AuthUser:
+    """
+    验证 WebSocket 连接的 Bearer Token
+
+    Raises:
+        JWTError: Token 无效或已过期
+    """
+    token = extract_bearer_from_headers(headers)
+    if not token:
+        raise JWTError("Missing authorization token")
+
+    return decode_token(token)
