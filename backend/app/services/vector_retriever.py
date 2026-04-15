@@ -8,6 +8,7 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
@@ -91,8 +92,10 @@ class MockVectorRetriever(VectorRetriever):
 
 class HybridRetriever(VectorRetriever):
     """
-    Dense(ANN) + Sparse(BM25) 混合检索
-    RRF 融合公式: score = Σ 1/(k + rank_i)
+    Dense(ANN) + Sparse(BM25) 真正多路召回
+    - Dense: 从 Milvus 语义召回
+    - Sparse: 从独立 BM25 索引关键词召回
+    - RRF 融合公式: score = Σ 1/(k + rank_i)
     """
 
     def __init__(
@@ -109,94 +112,139 @@ class HybridRetriever(VectorRetriever):
         self._k1 = k1
         self._b = b
         self._rrf_k = rrf_k
-        self._tokenizer = None
+        self._bm25_retriever: "BM25Retriever | None" = None
 
-    def _get_tokenizer(self):
-        if self._tokenizer is None:
-            from app.services.reranker import get_tokenizer
-            self._tokenizer = get_tokenizer()
-        return self._tokenizer
+    def _get_bm25_retriever(self) -> "BM25Retriever":
+        if self._bm25_retriever is None:
+            from app.services.bm25_retriever import BM25Retriever
+            self._bm25_retriever = BM25Retriever(
+                milvus_client=self._milvus,
+                k1=self._k1,
+                b=self._b,
+            )
+        return self._bm25_retriever
 
     async def retrieve(
         self, query: str, top_k: int = 10, filters: dict | None = None
     ) -> list[RetrievedDoc]:
-        # 1. Dense: ANN 搜索（取 top_k*2 以便 RRF 融合时有足够候选）
-        vectors = await self._embed.embed([query])
-        dense_docs = await self._milvus.search(
-            query_vector=vectors[0],
-            top_k=top_k * 2,
-            filters=filters,
-        )
-        if not dense_docs:
+        # 并行执行 Dense 和 Sparse 检索
+        dense_task = self._dense_search(query, top_k * 2, filters)
+        bm25_task = self._bm25_search(query, top_k * 2)
+
+        dense_results, bm25_results = await asyncio.gather(dense_task, bm25_task)
+
+        if not dense_results and not bm25_results:
             return []
 
-        # 2. Sparse: in-memory BM25 对 dense_docs 重打分
-        bm25_scores = self._bm25_score(query, [d.content for d in dense_docs])
+        # RRF 融合
+        fused = self._rrf_fusion(dense_results, bm25_results, top_k)
 
-        # 3. RRF 融合
-        fused = self._rrf_fusion(dense_docs, bm25_scores, top_k)
+        return fused[:top_k]
 
-        # 4. 注入 BM25 分到 metadata（供 reranker 使用）
-        bm25_map = {id(d): s for d, s in zip(dense_docs, bm25_scores)}
-        for doc in fused:
-            doc.metadata["bm25_score"] = bm25_map.get(id(doc), 0.0)
+    async def _dense_search(
+        self, query: str, top_k: int, filters: dict | None
+    ) -> list[RetrievedDoc]:
+        """Dense 语义检索"""
+        vectors = await self._embed.embed([query])
+        docs = await self._milvus.search(
+            query_vector=vectors[0],
+            top_k=top_k,
+            filters=filters,
+        )
+        return docs
 
-        return fused
+    async def _bm25_search(
+        self, query: str, top_k: int
+    ) -> list[RetrievedDoc]:
+        """BM25 关键词检索（全量文档）"""
+        bm25_retriever = self._get_bm25_retriever()
+        bm25_docs = await bm25_retriever.retrieve(query, top_k=top_k)
 
-    def _bm25_score(self, query: str, docs: list[str]) -> list[float]:
-        """
-        简化 BM25：对 dense 候选 docs 计算词匹配得分。
-        不做全量 collection 扫描，适合 top_k~20 的候选重打分。
-        """
-        tokenizer = self._get_tokenizer()
-        query_terms = tokenizer.tokenize(query)
-        if not query_terms:
-            return [0.0] * len(docs)
-
-        doc_count = len(docs)
-        # 收集词频
-        word_doc_freq: dict[str, int] = {}
-        docs_bow: list[dict[str, int]] = []
-        for doc_text in docs:
-            bow: dict[str, int] = {}
-            for word in tokenizer.tokenize(doc_text):
-                bow[word] = bow.get(word, 0) + 1
-                word_doc_freq[word] = word_doc_freq.get(word, 0) + 1
-            docs_bow.append(bow)
-
-        avgdl = sum(len(bow) for bow in docs_bow) / max(doc_count, 1)
-        scores = []
-        for bow in docs_bow:
-            score = 0.0
-            doc_len = len(bow)
-            for term in query_terms:
-                if term in bow:
-                    df = word_doc_freq.get(term, 0)
-                    idf = max(0, (doc_count - df + 0.5) / (df + 0.5))
-                    tf = bow[term]
-                    score += idf * (tf * (self._k1 + 1)) / (
-                        tf + self._k1 * (1 - self._b + self._b * doc_len / max(avgdl, 1))
-                    )
-            scores.append(score)
-
-        return scores
+        # 转换为 RetrievedDoc 格式
+        return [
+            RetrievedDoc(
+                content=doc.content,
+                metadata=doc.metadata,
+                score=doc.score,
+                source=doc.metadata.get("source", ""),
+            )
+            for doc in bm25_docs
+        ]
 
     def _rrf_fusion(
         self,
-        docs: list[RetrievedDoc],
-        bm25_scores: list[float],
+        dense_docs: list[RetrievedDoc],
+        bm25_docs: list[RetrievedDoc],
         top_k: int,
     ) -> list[RetrievedDoc]:
-        """Reciprocal Rank Fusion 融合 dense 和 bm25 排名"""
-        # 建立索引→位置映射
-        dense_ranked = sorted(range(len(docs)), key=lambda i: docs[i].score, reverse=True)
-        bm25_ranked = sorted(range(len(docs)), key=lambda i: bm25_scores[i], reverse=True)
+        """
+        RRF 融合 Dense 和 BM25 结果
+        基于 content 哈希对齐文档
+        """
+        # 建立 content 哈希 -> (dense_score, dense_rank) 映射
+        dense_map: dict[str, tuple[float, int]] = {}
+        for rank, doc in enumerate(dense_docs):
+            key = self._make_doc_key(doc)
+            dense_map[key] = (doc.score, rank)
 
-        rrf: dict[int, float] = {}
-        for rank, idx in enumerate(dense_ranked):
-            rrf[idx] = rrf.get(idx, 0) + 1.0 / (self._rrf_k + rank)
-        for rank, idx in enumerate(bm25_ranked):
-            rrf[idx] = rrf.get(idx, 0) + 1.0 / (self._rrf_k + rank)
+        # 建立 content 哈希 -> (bm25_score, bm25_rank) 映射
+        bm25_map: dict[str, tuple[float, int]] = {}
+        for rank, doc in enumerate(bm25_docs):
+            key = self._make_doc_key(doc)
+            bm25_map[key] = (doc.score, rank)
 
-        fused_indices = sorted(rrf.keys(), key=lambda i: rrf[i], reverse=True)[:top_k]
-        return [docs[i] for i in fused_indices]
+        # 收集所有唯一文档
+        all_keys: set[str] = set(dense_map.keys()) | set(bm25_map.keys())
+
+        # 计算 RRF 分数
+        rrf_scores: dict[str, float] = {}
+        for key in all_keys:
+            dense_rank = dense_map[key][1] if key in dense_map else len(dense_docs)
+            bm25_rank = bm25_map[key][1] if key in bm25_map else len(bm25_docs)
+            rrf_scores[key] = (
+                1.0 / (self._rrf_k + dense_rank) +
+                1.0 / (self._rrf_k + bm25_rank)
+            )
+
+        # 按 RRF 分数排序
+        sorted_keys = sorted(rrf_scores.keys(), key=lambda k: rrf_scores[k], reverse=True)
+
+        # 构建结果（合并 metadata）
+        result: list[RetrievedDoc] = []
+        for key in sorted_keys[:top_k * 2]:
+            # 优先使用 Dense 结果（包含完整 metadata）
+            doc = None
+            for d in dense_docs:
+                if self._make_doc_key(d) == key:
+                    doc = d
+                    break
+            if doc is None:
+                for d in bm25_docs:
+                    if self._make_doc_key(d) == key:
+                        doc = d
+                        break
+
+            if doc is None:
+                continue
+
+            new_doc = RetrievedDoc(
+                content=doc.content,
+                metadata={
+                    **doc.metadata,
+                    "bm25_score": bm25_map.get(key, (0.0, 0))[0],
+                    "dense_score": dense_map.get(key, (0.0, 0))[0],
+                    "dense_rank": dense_map.get(key, (0.0, len(dense_docs)))[1],
+                    "bm25_rank": bm25_map.get(key, (0.0, len(bm25_docs)))[1],
+                },
+                score=rrf_scores[key],
+                source=doc.source,
+            )
+            result.append(new_doc)
+
+        return result
+
+    def _make_doc_key(self, doc: RetrievedDoc) -> str:
+        """生成文档唯一标识（用于跨通道对齐）"""
+        content = doc.content.strip()
+        key_content = content[:200] if content else ""
+        return hashlib.md5(key_content.encode()).hexdigest()

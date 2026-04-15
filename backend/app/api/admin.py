@@ -135,7 +135,7 @@ async def list_documents():
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT id, doc_type, title, chunk_count, status, created_at, indexed_at "
-                "FROM documents ORDER BY created_at DESC LIMIT 100"
+                "FROM documents WHERE status != 'deleted' ORDER BY created_at DESC LIMIT 100"
             )
             rows = await cur.fetchall()
             columns = [col[0] for col in cur.description]
@@ -517,10 +517,12 @@ async def trigger_incremental_ingest(dry_run: bool = False, delete_missing: bool
 
     from pymilvus import Collection, connections, utility
 
-    # 计算 data_dir
+    # 计算 data_dir（项目根目录下的 data/ 文件夹）
     data_dir = os.getenv("DATA_DIR", None)
     if data_dir is None:
-        data_dir = str(Path(__file__).resolve().parent.parent.parent / "data")
+        # __file__ = backend/app/api/admin.py
+        # parent.parent.parent.parent = 项目根目录
+        data_dir = str(Path(__file__).resolve().parent.parent.parent.parent / "data")
 
     mysql_config = {
         "host": os.getenv("MYSQL_HOST", "localhost"),
@@ -563,9 +565,31 @@ async def trigger_incremental_ingest(dry_run: bool = False, delete_missing: bool
         port=milvus_config["port"],
         channel_kwargs={"grpc.max_receive_message_length": 32*1024*1024}
     )
+    # 确保 Milvus collection 已加载或创建
     milvus_collection = None
     if utility.has_collection("knowledge_base"):
         milvus_collection = Collection("knowledge_base")
+        milvus_collection.load()
+    else:
+        # 创建 collection
+        from pymilvus import CollectionSchema, DataType, FieldSchema
+        fields = [
+            FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=128, is_primary=True),
+            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=1024),
+            FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=4096),
+            FieldSchema(name="doc_id", dtype=DataType.INT64),
+            FieldSchema(name="chunk_index", dtype=DataType.INT64),
+            FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=256),
+            FieldSchema(name="doc_type", dtype=DataType.VARCHAR, max_length=64),
+            FieldSchema(name="section_type", dtype=DataType.VARCHAR, max_length=32),
+            FieldSchema(name="markets", dtype=DataType.VARCHAR, max_length=128),
+            FieldSchema(name="lang", dtype=DataType.VARCHAR, max_length=8),
+            FieldSchema(name="hierarchy", dtype=DataType.VARCHAR, max_length=256),
+        ]
+        schema = CollectionSchema(fields=fields, description="RAG Knowledge Base - v2")
+        milvus_collection = Collection(name="knowledge_base", schema=schema)
+        milvus_collection.create_index(field_name="vector", index_params={"index_type": "HNSW", "metric_type": "IP", "params": {"M": 16, "efConstruction": 200}})
+        milvus_collection.load()
 
     try:
         from app.services.incremental_ingest_core import run_incremental_ingestion

@@ -181,96 +181,133 @@ def _infer_mmr_reason(doc: RetrievedDoc, doc_content_lower: str) -> str:
 def _compute_bm25_and_rrf(
     query: str,
     dense_docs: list[RetrievedDoc],
+    milvus_client,
     k1: float = 1.5,
     b: float = 0.75,
     rrf_k: int = 60,
-) -> tuple[list[float], list[RetrievedDoc], list[RRFItem]]:
+) -> tuple[list[RetrievedDoc], list[RetrievedDoc], list[RRFItem]]:
     """
-    在 dense_docs 上计算 BM25 + RRF，返回:
-    - bm25_scores: 原始 BM25 分数列表
-    - fused_docs: RRF 融合后的 docs 列表
+    真正的多路召回：先从 Milvus 全量 BM25 召回，再与 Dense 融合。
+    返回:
+    - bm25_docs: BM25 召回的文档列表（独立召回，可能包含 dense 中没有的文档）
+    - fused_docs: RRF 融合后的 docs 列表（按 RRF 分数排序）
     - rrf_items: RRF 阶段的展示数据（含 rrf_score, dense_rank, bm25_rank）
     """
+    import asyncio
+    import hashlib
+
     if not dense_docs:
         return [], [], []
 
-    # BM25 scoring（与 HybridRetriever 逻辑一致）
+    async def _run():
+        from app.services.bm25_retriever import BM25Retriever
+
+        bm25_retriever = BM25Retriever(milvus_client=milvus_client, k1=k1, b=b)
+        bm25_results = await bm25_retriever.retrieve(query, top_k=20)
+
+        # 转换为 RetrievedDoc 格式
+        bm25_docs = [
+            RetrievedDoc(
+                content=doc.content,
+                metadata=doc.metadata,
+                score=doc.score,
+                source=doc.metadata.get("source", ""),
+            )
+            for doc in bm25_results
+        ]
+        return bm25_docs
+
+    # 在事件循环中执行异步 BM25 检索
     try:
-        from app.services.reranker import get_tokenizer
-        tokenizer = get_tokenizer()
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            import concurrent.futures
+            with concurrent.futures.ThreadPoolExecutor() as executor:
+                future = executor.submit(asyncio.run, _run())
+                bm25_docs = future.result(timeout=30)
+        else:
+            bm25_docs = loop.run_until_complete(_run())
     except Exception:
-        return [], dense_docs, []
+        bm25_docs = []
 
-    query_terms = tokenizer.tokenize(query)
-    if not query_terms:
-        bm25_scores = [0.0] * len(dense_docs)
-    else:
-        doc_count = len(dense_docs)
-        word_doc_freq: dict[str, int] = {}
-        docs_bow: list[dict[str, int]] = []
-        for doc_text in [d.content for d in dense_docs]:
-            bow: dict[str, int] = {}
-            for word in tokenizer.tokenize(doc_text):
-                bow[word] = bow.get(word, 0) + 1
-                word_doc_freq[word] = word_doc_freq.get(word, 0) + 1
-            docs_bow.append(bow)
+    # 建立 content 哈希映射
+    def make_key(doc: RetrievedDoc) -> str:
+        content = doc.content.strip()
+        key_content = content[:200] if content else ""
+        return hashlib.md5(key_content.encode()).hexdigest()
 
-        avgdl = sum(len(bow) for bow in docs_bow) / max(doc_count, 1)
-        bm25_scores = []
-        for bow in docs_bow:
-            score = 0.0
-            doc_len = len(bow)
-            for term in query_terms:
-                if term in bow:
-                    df = word_doc_freq.get(term, 0)
-                    idf = max(0, (doc_count - df + 0.5) / (df + 0.5))
-                    tf = bow[term]
-                    score += idf * (tf * (k1 + 1)) / (
-                        tf + k1 * (1 - b + b * doc_len / max(avgdl, 1))
-                    )
-            bm25_scores.append(score)
+    # Dense 映射
+    dense_map: dict[str, tuple[float, int]] = {}
+    for rank, doc in enumerate(dense_docs):
+        key = make_key(doc)
+        dense_map[key] = (doc.score, rank)
 
-    # RRF 融合
-    dense_ranked = sorted(range(len(dense_docs)), key=lambda i: dense_docs[i].score, reverse=True)
-    bm25_ranked = sorted(range(len(bm25_scores)), key=lambda i: bm25_scores[i], reverse=True)
+    # BM25 映射
+    bm25_map: dict[str, tuple[float, int]] = {}
+    for rank, doc in enumerate(bm25_docs):
+        key = make_key(doc)
+        bm25_map[key] = (doc.score, rank)
 
-    rrf: dict[int, float] = {}
-    for rank, idx in enumerate(dense_ranked):
-        rrf[idx] = rrf.get(idx, 0) + 1.0 / (rrf_k + rank)
-    for rank, idx in enumerate(bm25_ranked):
-        rrf[idx] = rrf.get(idx, 0) + 1.0 / (rrf_k + rank)
+    # 计算 RRF
+    all_keys = set(dense_map.keys()) | set(bm25_map.keys())
+    rrf_scores: dict[str, float] = {}
+    for key in all_keys:
+        dense_rank = dense_map[key][1] if key in dense_map else len(dense_docs)
+        bm25_rank = bm25_map[key][1] if key in bm25_map else len(bm25_docs)
+        rrf_scores[key] = 1.0 / (rrf_k + dense_rank) + 1.0 / (rrf_k + bm25_rank)
 
-    # 构建 rank 映射
-    dense_rank_map = {idx: rank for rank, idx in enumerate(dense_ranked)}
-    bm25_rank_map = {idx: rank for rank, idx in enumerate(bm25_ranked)}
+    sorted_keys = sorted(rrf_scores.keys(), key=lambda k: rrf_scores[k], reverse=True)
 
-    fused_indices = sorted(rrf.keys(), key=lambda i: rrf[i], reverse=True)
-    fused_docs = [dense_docs[i] for i in fused_indices]
-
-    # 构建 RRF items（含 rank 信息）
+    # 构建 RRF items
     rrf_items: list[RRFItem] = []
-    for idx in fused_indices:
-        doc = dense_docs[idx]
-        meta = doc.metadata
-        # 注入 bm25_score 到 metadata（供 reranker 使用）
-        doc.metadata["bm25_score"] = bm25_scores[idx]
-        doc.metadata["dense_rank"] = dense_rank_map[idx]
-        doc.metadata["bm25_rank"] = bm25_rank_map[idx]
+    fused_docs: list[RetrievedDoc] = []
+    bm25_scores_aligned: list[float] = [0.0] * len(dense_docs)
 
+    for key in sorted_keys[:20]:
+        # 找到对应文档
+        doc = None
+        for d in dense_docs:
+            if make_key(d) == key:
+                doc = d
+                break
+        if doc is None:
+            for d in bm25_docs:
+                if make_key(d) == key:
+                    doc = d
+                    break
+
+        if doc is None:
+            continue
+
+        dense_rank = dense_map.get(key, (0.0, len(dense_docs)))[1]
+        bm25_rank = bm25_map.get(key, (0.0, len(bm25_docs)))[1]
+        bm25_score_val = bm25_map.get(key, (0.0, 0))[0]
+
+        # 更新 dense_docs 中对应项的 metadata
+        for i, d in enumerate(dense_docs):
+            if make_key(d) == key:
+                d.metadata["bm25_score"] = bm25_score_val
+                d.metadata["dense_rank"] = dense_rank
+                d.metadata["bm25_rank"] = bm25_rank
+                bm25_scores_aligned[i] = bm25_score_val
+                break
+
+        meta = doc.metadata
         rrf_items.append(
             RRFItem(
                 content=doc.content,
-                rrf_score=rrf[idx],
-                dense_rank=dense_rank_map[idx],
-                bm25_rank=bm25_rank_map[idx],
+                rrf_score=rrf_scores[key],
+                dense_rank=dense_rank,
+                bm25_rank=bm25_rank,
                 section_type=meta.get("section_type", ""),
                 markets=meta.get("markets", []) if isinstance(meta.get("markets"), list) else [],
                 lang=meta.get("lang", ""),
                 source=doc.source,
             )
         )
+        fused_docs.append(doc)
 
-    return bm25_scores, fused_docs, rrf_items
+    return bm25_docs, fused_docs, rrf_items
 
 
 # ---------------------------------------------------------------------------
@@ -402,16 +439,16 @@ async def debug_retrieve(request: RetrieveRequest):
 
     if request.hybrid_search and dense_docs:
         try:
-            # 同时计算 BM25 和 RRF（复用 dense_docs）
-            bm25_scores, fused_docs, rrf_items = _compute_bm25_and_rrf(
-                request.query, dense_docs,
+            # 真正的多路召回：BM25 从全量文档检索 + RRF 融合
+            bm25_docs, fused_docs, rrf_items = _compute_bm25_and_rrf(
+                request.query, dense_docs, milvus_client,
                 k1=1.5, b=0.75, rrf_k=60,
             )
 
-            # BM25 stage
+            # BM25 stage - 显示 BM25 召回的独立结果
             bm25_items = []
-            for idx, doc in enumerate(dense_docs):
-                bm25_raw = bm25_scores[idx]
+            for idx, doc in enumerate(bm25_docs):
+                bm25_raw = doc.score
                 bm25_norm = math.log1p(bm25_raw) / 10.0
                 bm25_items.append(
                     BM25Item(

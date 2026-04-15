@@ -225,8 +225,8 @@ def create_app() -> FastAPI:
         CORSMiddleware,
         allow_origins=cors_origins,
         allow_credentials=allow_creds,
-        allow_methods=["GET", "POST", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID"],
+        allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID", "X-HTTP-Method-Override"],
     )
 
     # Request ID 中间件
@@ -235,6 +235,26 @@ def create_app() -> FastAPI:
         request.state.request_id = str(uuid.uuid4())
         response = await call_next(request)
         response.headers["X-Request-ID"] = request.state.request_id
+        return response
+
+    # HTTP Method Override 中间件（支持 _method 字段模拟 DELETE/PUT）
+    @app.middleware("http")
+    async def method_override_middleware(request: Request, call_next):
+        if request.method == "POST":
+            try:
+                body = await request.body()
+                if body:
+                    import json
+                    data = json.loads(body)
+                    override = data.get("_method", "").upper()
+                    if override in ("DELETE", "PUT", "PATCH"):
+                        # 替换方法并重新构建请求
+                        scope = request.scope
+                        scope["method"] = override
+                        request = Request(scope, request.receive)
+            except Exception:
+                pass
+        response = await call_next(request)
         return response
 
     # 注册路由

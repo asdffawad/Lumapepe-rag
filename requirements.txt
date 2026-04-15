@@ -27,3 +27,4 @@ lxml>=5.0.0
 # Enterprise LLM features (recommended, with graceful fallbacks)
 tiktoken>=0.7.0        # Precise token counting (falls back to char-based if not installed)
 jieba>=0.42.1          # Chinese word segmentation (falls back to char-level if not installed)
+rank-bm25>=0.2.0       # BM25 sparse retrieval for hybrid search

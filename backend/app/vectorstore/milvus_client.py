@@ -59,7 +59,9 @@ class MilvusClient:
             name = self.config.collection_name
             if utility.has_collection(name):
                 self._collection = Collection(name)
-                # 复用已有 collection 时，从索引信息推断 search_params
+                # 确保已加载（Milvus 需要加载后才能搜索）
+                self._collection.load()
+                # 从索引信息推断 search_params
                 indexes = self._collection.indexes
                 if indexes:
                     idx = indexes[0]

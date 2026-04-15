@@ -11,7 +11,7 @@ services:
       - "8000:8000"
     working_dir: /app/backend
     environment:
-      - PYTHONPATH=/app/backend
+      - PYTHONPATH=/app/backend:/app/scripts
       # MySQL
       - MYSQL_HOST=mysql
       - MYSQL_PORT=3306

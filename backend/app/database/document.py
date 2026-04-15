@@ -87,9 +87,9 @@ class DocumentRepository:
         """
         async with self.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
-                # 查询是否存在该 source_path 的记录
+                # 查询是否存在该 source_path 的记录（按 id 倒序，取最新的一条）
                 await cur.execute(
-                    "SELECT id, file_hash FROM documents WHERE source_path = %s AND status != 'deleted'",
+                    "SELECT id, file_hash FROM documents WHERE source_path = %s AND status != 'deleted' ORDER BY id DESC LIMIT 1",
                     (source_path,),
                 )
                 existing = await cur.fetchone()
@@ -113,7 +113,7 @@ class DocumentRepository:
                     )
                     return (existing["id"], "updated")
 
-                # 内容未变化
+                # 内容未变化，保持原有状态（已有索引的应保持 done）
                 return (existing["id"], "unchanged")
 
     async def mark_deleted(self, doc_id: int):
@@ -122,6 +122,15 @@ class DocumentRepository:
             async with conn.cursor() as cur:
                 await cur.execute(
                     "UPDATE documents SET status = 'deleted' WHERE id = %s",
+                    (doc_id,),
+                )
+
+    async def hard_delete(self, doc_id: int):
+        """Hard delete document (remove from MySQL)"""
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "DELETE FROM documents WHERE id = %s",
                     (doc_id,),
                 )
 

@@ -12,11 +12,20 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Optional
 
 import httpx
+
+# ============================================================================
+# 修复 sys.path：确保 /app 在路径中，这样才能导入 scripts 模块
+# ============================================================================
+import sys as _sys
+_app_idx = next((i for i, p in enumerate(_sys.path) if p == '/app' or p.rstrip('/') == '/app'), None)
+if _app_idx is None:
+    _sys.path.insert(0, '/app')
 
 # ============================================================================
 # _parse_file_safe 导入（支持 scripts.ingest_data 和 ingest_data 两种路径）
@@ -53,24 +62,6 @@ class IncrementalIngestResult:
 # ============================================================================
 
 def scan_data_directory(data_dir: Path) -> list[dict]:
-    """
-    扫描数据目录，返回文件项列表
-
-    返回格式:
-        {
-            "source_path": str,       # 唯一标识
-            "mtime": float,           # 修改时间戳
-            "item": dict | None,      # JSON 项数据（富文本文件为 None）
-            "doc_type": str,          # 文档类型
-            "file_path": str | None,  # 富文本文件绝对路径（仅 item=None 时有值）
-        }
-
-    扫描规则:
-        - products.json: 每个 item 的 source_path = f"products.json::{product_id}"
-        - knowledge_base.json: 每个 item 的 source_path = f"knowledge_base.json::{id}"
-        - orders.json: 每个 item 的 source_path = f"orders.json::{order_id}"
-        - 富文本文件 (.pdf/.docx/.html/.htm): source_path = 相对于 data_dir 的相对路径
-    """
     result: list[dict] = []
     data_path = Path(data_dir)
 
@@ -415,7 +406,17 @@ async def run_incremental_ingestion(
                         continue
 
                     # 解析富文本文件
-                    parsed = _parse_file_safe(file_path)
+                    try:
+                        parsed = _parse_file_safe(file_path)
+                    except Exception as parse_exc:
+                        result.errors += 1
+                        result.details.append({
+                            "source_path": source_path,
+                            "action": "error",
+                            "message": f"解析异常: {parse_exc}",
+                        })
+                        continue
+
                     if parsed is None:
                         result.errors += 1
                         result.details.append({
@@ -569,7 +570,7 @@ async def run_incremental_ingestion(
                 print(f"[ERROR] 处理 {source_path} 失败: {e}")
 
         # =========================================================================
-        # 5. 处理缺失文档（软删除）
+        # 5. 处理缺失文档（硬删除 MySQL + Milvus）
         # =========================================================================
         if delete_missing and not dry_run:
             try:
@@ -581,14 +582,6 @@ async def run_incremental_ingestion(
 
                 for doc_id, path in db_records:
                     if path in missing_paths:
-                        await repo.mark_deleted(doc_id)
-                        result.deleted += 1
-                        result.details.append({
-                            "source_path": path,
-                            "action": "deleted",
-                            "doc_id": doc_id,
-                        })
-
                         # 删除 Milvus 向量
                         if milvus_collection is not None:
                             try:
@@ -596,6 +589,15 @@ async def run_incremental_ingestion(
                                 milvus_collection.flush()
                             except Exception as e:
                                 print(f"[WARN] 删除 Milvus 向量失败 doc_id={doc_id}: {e}")
+
+                        # 硬删除 MySQL 记录
+                        await repo.hard_delete(doc_id)
+                        result.deleted += 1
+                        result.details.append({
+                            "source_path": path,
+                            "action": "deleted",
+                            "doc_id": doc_id,
+                        })
 
             except Exception as e:
                 print(f"[ERROR] 处理缺失文档失败: {e}")

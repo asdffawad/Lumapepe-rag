@@ -51,6 +51,7 @@ for _p in [str(BACKEND_DIR), str(PROJECT_DIR)]:
 def _parse_file(file_path: str) -> _ParsedFileResult:
     """根据文件扩展名解析富文本文件。"""
     ext = "." + file_path.rsplit(".", 1)[-1].lower()
+    file_stem = Path(file_path).stem  # 跨平台获取文件名（不含扩展名）
 
     if ext == ".pdf":
         try:
@@ -63,14 +64,14 @@ def _parse_file(file_path: str) -> _ParsedFileResult:
         lines = []
         with pdfplumber.open(file_path) as pdf:
             if pdf.metadata:
-                title = pdf.metadata.get("Title", "") or file_path.rsplit("/", 1)[-1]
+                title = pdf.metadata.get("Title", "") or ""
             for page in pdf.pages:
                 text = page.extract_text() or ""
                 if text.strip():
                     lines.append(text)
         content = re.sub(r"[ \t]+", " ", "\n".join(lines)).strip()
         markets, lang = _infer_file_metadata(file_path, content)
-        return _ParsedFileResult(title or file_path, content, markets, lang)
+        return _ParsedFileResult(title or file_stem, content, markets, lang)
 
     elif ext in (".html", ".htm"):
         try:
@@ -84,11 +85,11 @@ def _parse_file(file_path: str) -> _ParsedFileResult:
         soup = BeautifulSoup(html, "lxml")
         for tag in soup(["script", "style", "nav", "footer", "header"]):
             tag.decompose()
-        title = soup.title.string.strip() if soup.title else file_path.rsplit("/", 1)[-1]
+        title = soup.title.string.strip() if soup.title else file_stem
         text = soup.get_text(separator="\n", strip=True)
         content = re.sub(r"[ \t]+", " ", text).strip()
         markets, lang = _infer_file_metadata(file_path, content)
-        return _ParsedFileResult(title, content, markets, lang)
+        return _ParsedFileResult(title or file_stem, content, markets, lang)
 
     elif ext == ".docx":
         try:
@@ -108,7 +109,9 @@ def _parse_file(file_path: str) -> _ParsedFileResult:
                 lines.append(text)
         content = re.sub(r"[ \t]+", " ", "\n".join(lines)).strip()
         markets, lang = _infer_file_metadata(file_path, content)
-        return _ParsedFileResult(title or file_path.rsplit("/", 1)[-1].replace(".docx", ""), content, markets, lang)
+        # 使用 Path.stem 避免 Windows 路径兼容性问题
+        fallback_title = Path(file_path).stem
+        return _ParsedFileResult(title or fallback_title, content, markets, lang)
 
     else:
         raise ValueError(f"Unsupported file type: {ext}")
