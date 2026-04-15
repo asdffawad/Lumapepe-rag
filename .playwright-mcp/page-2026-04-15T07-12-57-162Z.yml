@@ -1,0 +1,85 @@
+- generic [ref=e1]:
+  - navigation [ref=e2]:
+    - heading "RAG 管理后台" [level=1] [ref=e3]
+    - generic [ref=e4]:
+      - link "返回聊天" [ref=e5] [cursor=pointer]:
+        - /url: /
+      - generic [ref=e6]: "|"
+      - link "Prometheus" [ref=e7] [cursor=pointer]:
+        - /url: /metrics
+  - generic [ref=e8]:
+    - button "监控面板" [ref=e9] [cursor=pointer]:
+      - img [ref=e10]
+      - text: 监控面板
+    - button "测试" [ref=e12] [cursor=pointer]:
+      - img [ref=e13]
+      - text: 测试
+    - button "知识库" [ref=e15] [cursor=pointer]:
+      - img [ref=e16]
+      - text: 知识库
+    - button "增量摄取" [ref=e19] [cursor=pointer]:
+      - img [ref=e20]
+      - text: 增量摄取
+    - button "检索调试" [ref=e23] [cursor=pointer]:
+      - img [ref=e24]
+      - text: 检索调试
+  - generic [ref=e870]:
+    - generic [ref=e871]:
+      - generic [ref=e873]: 参数控制
+      - generic [ref=e874]:
+        - textbox "输入查询词..." [ref=e876]: 平台
+        - generic [ref=e877]:
+          - generic [ref=e878]:
+            - generic [ref=e879]: Top-K
+            - slider [ref=e880]: "10"
+            - generic [ref=e881]: "10"
+          - generic [ref=e882]:
+            - generic [ref=e883]: Rerank
+            - slider [ref=e884]: "5"
+            - generic [ref=e885]: "5"
+          - generic [ref=e886]:
+            - generic [ref=e887]: BM25
+            - slider [ref=e888]: "30"
+            - generic [ref=e889]: "0.30"
+          - generic [ref=e890]:
+            - generic [ref=e891]: "语言:"
+            - generic [ref=e892] [cursor=pointer]:
+              - checkbox "中文" [ref=e893]
+              - text: 中文
+            - generic [ref=e894] [cursor=pointer]:
+              - checkbox "英文" [ref=e895]
+              - text: 英文
+            - generic [ref=e896] [cursor=pointer]:
+              - checkbox "越南" [ref=e897]
+              - text: 越南
+        - generic [ref=e898]:
+          - generic [ref=e899] [cursor=pointer]:
+            - generic [ref=e900]:
+              - checkbox "Hybrid 混合检索 · Dense+BM25" [checked]
+            - generic [ref=e902]: Hybrid 混合检索 · Dense+BM25
+          - generic [ref=e903] [cursor=pointer]:
+            - generic [ref=e904]:
+              - checkbox "LLM 重排 · 规则+LLM混合"
+            - generic [ref=e906]: LLM 重排 · 规则+LLM混合
+          - generic [ref=e907] [cursor=pointer]:
+            - generic [ref=e908]:
+              - checkbox "执行 LLM 生成 · 完整 RAG"
+            - generic [ref=e910]: 执行 LLM 生成 · 完整 RAG
+          - button "执行" [active] [ref=e911] [cursor=pointer]:
+            - img [ref=e912]
+            - text: 执行
+    - generic [ref=e914]:
+      - generic [ref=e935] [cursor=pointer]:
+        - img [ref=e936]
+        - generic [ref=e938]: Dense 向量召回
+        - generic [ref=e940]:
+          - generic [ref=e941]: "0"
+          - generic [ref=e942]: 0ms
+      - generic [ref=e944] [cursor=pointer]:
+        - img [ref=e945]
+        - generic [ref=e947]: MMR 重排 · 规则
+        - generic [ref=e949]:
+          - generic [ref=e950]: "0"
+          - generic [ref=e951]: 0ms
+      - generic [ref=e952]: "总耗时: 1.817914999264758 ms"
+  - generic: 删除失败
