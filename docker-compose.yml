@@ -30,11 +30,11 @@ services:
       - CELERY_BROKER_URL=redis://redis:6379/1
       - CELERY_RESULT_BACKEND=redis://redis:6379/2
       # LLM
-      - LLM_PROVIDER=${LLM_PROVIDER:-mock}
+      - LLM_PROVIDER=${LLM_PROVIDER:-qwen}
       - LLM_MODEL_NAME=${LLM_MODEL_NAME:-qwen-max}
       - LLM_FALLBACK_MODELS=${LLM_FALLBACK_MODELS:-qwen-plus,qwen-turbo}
-      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-}
-      - LLM_BASE_URL=${LLM_BASE_URL:-https://dashscope.aliyuncs.com}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-sk-your-api-key-here}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
       - LLM_TIMEOUT=60
       - LLM_MAX_RETRIES=3
       - LLM_TEMPERATURE=0.7
