@@ -1,5 +1,5 @@
 """
-意图分类服务（企业级）
+意图分类服务
 - 分类类别: product_qa | order_query | refund_return | general_chat |
             product_comparison | promotion_inquiry | account_info |
             technical_support | feedback_complaint

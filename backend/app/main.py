@@ -30,7 +30,7 @@ from app.services.vector_retriever import MockVectorRetriever, SimpleVectorRetri
 from app.services.reranker import MockReranker, MMRReranker
 from app.services.prompt_builder import MockPromptBuilder, EcommercePromptBuilder
 from app.services.llm_generator import MockLLMGenerator, StandardLLMGenerator
-from app.api import chat, intent, health, admin, debug, websocket
+from app.api import chat, intent, health, admin, debug, websocket, product
 from app import metrics
 from app.logging_config import get_logger as _get_logger
 
@@ -131,6 +131,45 @@ async def lifespan(app: FastAPI):
         intent_classifier = HybridIntentClassifier(llm)
     app.state.intent_classifier = intent_classifier
 
+    # 初始化商品检索模块
+    from app.etl.dict_loader import ProductDictLoader
+    from app.services.product_service import ProductService
+
+    dict_loader = ProductDictLoader(
+        dict_path=config.product.dict_path,
+        reload_interval_seconds=config.product.reload_interval_seconds,
+    )
+
+    product_service = ProductService(
+        dict_loader=dict_loader,
+        max_batch_size=config.product.max_batch_size,
+    )
+    app.state.product_service = product_service
+
+    # 注册API路由
+    from app.api.product import set_product_service
+    set_product_service(product_service)
+    app.include_router(product.router)
+
+    # 尝试加载字典（非阻塞）
+    try:
+        if Path(config.product.dict_path).exists():
+            await dict_loader.load()
+            logger.info("Product dictionary loaded", extra={
+                "path": config.product.dict_path,
+                "version": dict_loader.version,
+            })
+            # 启动定时重载
+            if config.product.enabled:
+                await dict_loader.start_auto_reload()
+        else:
+            logger.warning(
+                "Product dictionary not found, run ETL first",
+                extra={"path": config.product.dict_path}
+            )
+    except Exception as e:
+        logger.error("Failed to load product dictionary", extra={"error": str(e)})
+
     # 检查是否需要自动知识库摄取
     if config.ingest.auto_ingest:
         try:
@@ -171,6 +210,15 @@ async def lifespan(app: FastAPI):
     # Shutdown
     try:
         await monitor.stop()
+    except Exception:
+        pass
+    try:
+        # 停止商品字典自动重载
+        if hasattr(app.state, 'product_service') and app.state.product_service:
+            try:
+                await app.state.product_service._dict_loader.stop_auto_reload()
+            except Exception:
+                pass
     except Exception:
         pass
     try:

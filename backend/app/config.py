@@ -100,6 +100,15 @@ class IngestConfig:
 
 
 @dataclass
+class ProductConfig:
+    dict_path: str = "data/product_dict.json"      # 字典文件路径
+    reload_interval_seconds: int = 3600            # 自动重载间隔（秒）
+    fuzzy_threshold: int = 80                      # 模糊匹配阈值（0-100）
+    max_batch_size: int = 100                      # 批量查询最大数量
+    enabled: bool = True                           # 是否启用商品检索模块
+
+
+@dataclass
 class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     db: DBConfig = field(default_factory=DBConfig)
@@ -110,6 +119,7 @@ class AppConfig:
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
     websocket: WebSocketConfig = field(default_factory=WebSocketConfig)
     ingest: IngestConfig = field(default_factory=IngestConfig)
+    product: ProductConfig = field(default_factory=ProductConfig)  # 商品检索配置
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
     debug: bool = False
 
@@ -187,6 +197,13 @@ def get_config() -> AppConfig:
             chunk_overlap=int(os.getenv("CHUNK_OVERLAP", "50")),
             chunk_unit=os.getenv("CHUNK_UNIT", "token"),
             batch_size=int(os.getenv("INGEST_BATCH_SIZE", "10")),
+        ),
+        product=ProductConfig(
+            dict_path=os.getenv("PRODUCT_DICT_PATH", "data/product_dict.json"),
+            reload_interval_seconds=int(os.getenv("PRODUCT_RELOAD_INTERVAL", "3600")),
+            fuzzy_threshold=int(os.getenv("PRODUCT_FUZZY_THRESHOLD", "80")),
+            max_batch_size=int(os.getenv("PRODUCT_MAX_BATCH_SIZE", "100")),
+            enabled=_str_to_bool(os.getenv("PRODUCT_ENABLED", "true")),
         ),
         cors_origins=os.getenv("CORS_ORIGINS", "*").split(","),
         debug=_str_to_bool(os.getenv("DEBUG")),
