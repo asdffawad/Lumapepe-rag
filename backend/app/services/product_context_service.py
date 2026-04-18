@@ -122,7 +122,9 @@ class ProductContextService:
         return info
 
     def _segment_to_dict(self, seg) -> dict:
-        """将 ParsedTextSegment 转换为字典"""
+        """将 ParsedTextSegment 或字典转换为字典"""
+        if isinstance(seg, dict):
+            return seg
         return {
             "type": seg.type,
             "content": seg.content,
