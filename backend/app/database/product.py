@@ -213,11 +213,11 @@ class ProductRepository:
                     SELECT
                         s.id as sku_id, s.spu_id, s.bar_code, s.properties,
                         s.price as sku_price, s.stock as sku_stock, s.pic_url,
-                        s.created_at as sku_created_at, s.updated_at as sku_updated_at,
+                        s.create_time as sku_created_at, s.update_time as sku_updated_at,
                         p.id as spu_id, p.name, p.keyword, p.introduction,
                         p.description, p.category_id, p.brand_id,
                         p.price as spu_price, p.stock as spu_stock,
-                        p.created_at as spu_created_at, p.updated_at as spu_updated_at
+                        p.create_time as spu_created_at, p.update_time as spu_updated_at
                     FROM product_sku s
                     LEFT JOIN product_spu p ON s.spu_id = p.id
                     WHERE s.id = %s
@@ -237,8 +237,8 @@ class ProductRepository:
                     price=row["sku_price"],
                     stock=row["sku_stock"],
                     pic_url=row["pic_url"],
-                    created_at=row["sku_created_at"],
-                    updated_at=row["sku_updated_at"],
+                    create_time=row["sku_created_at"],
+                    update_time=row["sku_updated_at"],
                 )
 
                 spu = None
@@ -251,10 +251,14 @@ class ProductRepository:
                         description=row["description"],
                         category_id=row["category_id"],
                         brand_id=row["brand_id"],
+                        pic_url=row.get("pic_url"),
+                        slider_pic_urls=row.get("slider_pic_urls"),
+                        status=row.get("status"),
+                        spec_type=row.get("spec_type"),
                         price=row["spu_price"],
                         stock=row["spu_stock"],
-                        created_at=row["spu_created_at"],
-                        updated_at=row["spu_updated_at"],
+                        create_time=row["spu_created_at"],
+                        update_time=row["spu_updated_at"],
                     )
 
                 return sku, spu
@@ -267,10 +271,17 @@ class ProductRepository:
             bar_code=row.get("bar_code"),
             properties=row.get("properties", "{}"),
             price=float(row.get("price", 0) or 0),
-            stock=int(row.get("stock", 0) or 0),
+            market_price=float(row.get("market_price", 0) or 0) if row.get("market_price") else None,
+            cost_price=float(row.get("cost_price", 0) or 0) if row.get("cost_price") else None,
+            suggest_sell_price=float(row.get("suggest_sell_price", 0) or 0) if row.get("suggest_sell_price") else None,
+            supply_external_sku=row.get("supply_external_sku"),
             pic_url=row.get("pic_url"),
-            created_at=row.get("created_at"),
-            updated_at=row.get("updated_at"),
+            stock=int(row.get("stock", 0) or 0),
+            weight=float(row["weight"]) if row.get("weight") is not None else None,
+            volume=float(row["volume"]) if row.get("volume") is not None else None,
+            sales_count=int(row["sales_count"]) if row.get("sales_count") is not None else None,
+            create_time=row.get("create_time"),
+            update_time=row.get("update_time"),
         )
 
     def _row_to_spu(self, row: dict) -> SpuInfo:
@@ -283,8 +294,98 @@ class ProductRepository:
             description=row.get("description"),
             category_id=row.get("category_id"),
             brand_id=row.get("brand_id"),
-            price=float(row["price"]) if row.get("price") else None,
-            stock=int(row["stock"]) if row.get("stock") else None,
-            created_at=row.get("created_at"),
-            updated_at=row.get("updated_at"),
+            pic_url=row.get("pic_url"),
+            slider_pic_urls=row.get("slider_pic_urls"),
+            status=row.get("status"),
+            spec_type=row.get("spec_type"),
+            price=float(row["price"]) if row.get("price") is not None else None,
+            market_price=float(row["market_price"]) if row.get("market_price") is not None else None,
+            cost_price=float(row["cost_price"]) if row.get("cost_price") is not None else None,
+            stock=int(row["stock"]) if row.get("stock") is not None else None,
+            sales_count=int(row["sales_count"]) if row.get("sales_count") is not None else None,
+            virtual_sales_count=int(row["virtual_sales_count"]) if row.get("virtual_sales_count") is not None else None,
+            browse_count=int(row["browse_count"]) if row.get("browse_count") is not None else None,
+            sort=row.get("sort"),
+            create_time=row.get("create_time"),
+            update_time=row.get("update_time"),
         )
+
+    async def get_sku_by_barcode(self, barcode: str) -> Optional[SkuInfo]:
+        """
+        根据条形码查询SKU
+
+        Args:
+            barcode: 条形码
+
+        Returns:
+            SkuInfo 或 None
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(DictCursor) as cur:
+                await cur.execute(
+                    "SELECT * FROM product_sku WHERE bar_code = %s",
+                    (barcode,)
+                )
+                row = await cur.fetchone()
+                return self._row_to_sku(row) if row else None
+
+    async def get_sku_by_supply_sku(self, supply_sku: str) -> list[SkuInfo]:
+        """
+        根据供应链SKU查询SKU列表
+
+        Args:
+            supply_sku: 供应链SKU编号
+
+        Returns:
+            SkuInfo 列表
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(DictCursor) as cur:
+                # 使用LIKE查询，因为supply_external_sku可能包含多个值
+                await cur.execute(
+                    "SELECT * FROM product_sku WHERE supply_external_sku LIKE %s",
+                    (f"%{supply_sku}%",)
+                )
+                rows = await cur.fetchall()
+                return [self._row_to_sku(row) for row in rows]
+
+    async def get_spu_by_category(self, category_id: int, limit: int = 20) -> list[SpuInfo]:
+        """
+        根据分类ID查询SPU列表
+
+        Args:
+            category_id: 分类ID
+            limit: 返回数量限制
+
+        Returns:
+            SpuInfo 列表
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(DictCursor) as cur:
+                await cur.execute(
+                    "SELECT * FROM product_spu WHERE category_id = %s AND status = 1 ORDER BY sort DESC LIMIT %s",
+                    (category_id, limit)
+                )
+                rows = await cur.fetchall()
+                return [self._row_to_spu(row) for row in rows]
+
+    async def get_spu_by_brand(self, brand_id: int, limit: int = 20) -> list[SpuInfo]:
+        """
+        根据品牌ID查询SPU列表
+
+        Args:
+            brand_id: 品牌ID
+            limit: 返回数量限制
+
+        Returns:
+            SpuInfo 列表
+        """
+        async with self._pool.acquire() as conn:
+            async with conn.cursor(DictCursor) as cur:
+                await cur.execute(
+                    "SELECT * FROM product_spu WHERE brand_id = %s AND status = 1 ORDER BY sort DESC LIMIT %s",
+                    (brand_id, limit)
+                )
+                rows = await cur.fetchall()
+                return [self._row_to_spu(row) for row in rows]
+

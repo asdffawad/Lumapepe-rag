@@ -375,6 +375,7 @@ class EcommercePromptBuilder(PromptBuilder):
         intent: str,
         history: list[dict],
         tool_result: "ToolResult | None" = None,
+        product_context: "dict | None" = None,
     ) -> Prompt:
         system_prompt = self._get_system_prompt(intent)
 
@@ -403,6 +404,16 @@ class EcommercePromptBuilder(PromptBuilder):
         if tool_result is not None:
             tool_context = format_tool_result_for_prompt(tool_result)
             context_text = f"{tool_context}\n\n{'='*40}\n\n{context_text}"
+
+        # 商品上下文注入（如果存在）
+        if product_context and product_context.get("product_name"):
+            product_section = f"【商品检索结果】\n"
+            product_section += f"商品名称: {product_context.get('product_name', '未知')}\n"
+            if product_context.get("product_detail"):
+                product_section += f"商品详情: {product_context.get('product_detail')}\n"
+            product_section += f"匹配方式: {product_context.get('match_type', '未知')}\n"
+            product_section += f"置信度: {product_context.get('confidence', 0):.2f}"
+            context_text = f"{product_section}\n\n{'='*40}\n\n{context_text}"
 
         # 构建历史
         history_text = self._build_history(history)
@@ -446,7 +457,13 @@ class ConcisePromptBuilder(PromptBuilder):
         return len(text) // 4
 
     def build(
-        self, query: str, context: list[RerankedDoc], intent: str, history: list[dict]
+        self,
+        query: str,
+        context: list[RerankedDoc],
+        intent: str,
+        history: list[dict],
+        tool_result: "ToolResult | None" = None,
+        product_context: "dict | None" = None,
     ) -> Prompt:
         system_prompt = SYSTEM_TEMPLATES.get(intent, DEFAULT_SYSTEM)
         system_tokens = self._count_tokens(system_prompt)
@@ -468,6 +485,21 @@ class ConcisePromptBuilder(PromptBuilder):
             )
         else:
             context_text = context_raw
+
+        # 工具结果注入
+        if tool_result is not None:
+            tool_context = format_tool_result_for_prompt(tool_result)
+            context_text = f"{tool_context}\n\n{'='*40}\n\n{context_text}"
+
+        # 商品上下文注入
+        if product_context and product_context.get("product_name"):
+            product_section = f"【商品检索结果】\n"
+            product_section += f"商品名称: {product_context.get('product_name', '未知')}\n"
+            if product_context.get("product_detail"):
+                product_section += f"商品详情: {product_context.get('product_detail')}\n"
+            product_section += f"匹配方式: {product_context.get('match_type', '未知')}\n"
+            product_section += f"置信度: {product_context.get('confidence', 0):.2f}"
+            context_text = f"{product_section}\n\n{'='*40}\n\n{context_text}"
 
         # 精简历史
         hist_turns = []
@@ -503,13 +535,17 @@ class MockPromptBuilder(PromptBuilder):
         intent: str,
         history: list[dict],
         tool_result: "ToolResult | None" = None,
+        product_context: "dict | None" = None,
     ) -> Prompt:
         tool_info = ""
         if tool_result is not None:
             tool_info = f"\n[Tool: {tool_result.source}]"
+        product_info = ""
+        if product_context and product_context.get("product_name"):
+            product_info = f"\n[Product: {product_context.get('product_name', '')}]"
         return Prompt(
             system=DEFAULT_SYSTEM,
-            user=f"Query: {query}\nContext: {len(context)} docs{tool_info}",
+            user=f"Query: {query}\nContext: {len(context)} docs{tool_info}{product_info}",
             system_tokens=50,
             user_tokens=50,
             version="mock",

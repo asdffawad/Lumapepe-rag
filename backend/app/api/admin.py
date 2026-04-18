@@ -29,6 +29,7 @@ import json
 import os
 import subprocess
 import sys
+import time
 from pathlib import Path
 from typing import Any
 
@@ -614,3 +615,122 @@ async def trigger_incremental_ingest(dry_run: bool = False, delete_missing: bool
         pool.close()
         await pool.wait_closed()
         await asyncio.to_thread(connections.disconnect, alias=alias)
+
+
+# ============ WebSocket 连接管理（调试工具）============
+
+from fastapi import Depends, Request
+from app.middleware.auth import get_current_user, AuthUser
+from app.api.ws_manager import get_connection_manager, reset_connection_manager
+
+
+@router.get("/ws/connections")
+async def list_connections(current_user: AuthUser = Depends(get_current_user)):
+    """
+    查看当前活跃的 WebSocket 连接（仅管理员）
+
+    返回：
+    - 全局连接数
+    - 每个用户的连接列表
+    - 每个连接的详细信息（session_id, user_id, 连接时间, 最后活动时间）
+    """
+    # 只有管理员可以查看
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="需要管理员权限"
+        )
+
+    manager = get_connection_manager()
+
+    connections = []
+    for session_id, info in manager._connections.items():
+        connections.append({
+            "session_id": session_id,
+            "user_id": info.user_id,
+            "connected_at": info.connected_at,
+            "last_activity": info.last_activity,
+            "uptime_seconds": round(time.time() - info.connected_at, 2),
+        })
+
+    return {
+        "success": True,
+        "data": {
+            "global_count": manager.get_active_count(),
+            "connections": connections,
+            "user_sessions": {
+                user_id: list(session_ids)
+                for user_id, session_ids in manager._user_sessions.items()
+            }
+        }
+    }
+
+
+@router.post("/ws/connections/user/clear")
+async def clear_user_connections(
+    user_id: str = None,
+    current_user: AuthUser = Depends(get_current_user)
+):
+    """
+    清理指定用户的所有 WebSocket 连接
+
+    参数（Query）：
+    - user_id: 要清理的用户 ID（不提供则清理当前用户的连接）
+
+    示例：
+    POST /api/v1/admin/ws/connections/user/clear?user_id=user-abc123
+    """
+    # 权限检查：只能清理自己的连接，或管理员清理任意用户
+    if current_user.role != "admin":
+        if user_id and user_id != current_user.user_id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="只能清理自己的连接"
+            )
+        user_id = current_user.user_id
+
+    manager = get_connection_manager()
+    sessions = manager.get_user_sessions(user_id)
+
+    count = 0
+    for session_id in sessions:
+        await manager.disconnect(session_id)
+        count += 1
+
+    return {
+        "success": True,
+        "data": {
+            "cleared_user": user_id,
+            "cleared_count": count,
+        },
+        "message": f"已清理用户 {user_id} 的 {count} 个连接"
+    }
+
+
+@router.post("/ws/connections/all/clear")
+async def clear_all_connections(current_user: AuthUser = Depends(get_current_user)):
+    """
+    清理所有 WebSocket 连接（仅管理员）
+
+    用于���急情况：当连接数超限或需要强制重启时
+    """
+    if current_user.role != "admin":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="需要管理员权限"
+        )
+
+    manager = get_connection_manager()
+    count = manager.get_active_count()
+
+    # 断开所有连接
+    for session_id in list(manager._connections.keys()):
+        await manager.disconnect(session_id)
+
+    return {
+        "success": True,
+        "data": {
+            "cleared_count": count,
+        },
+        "message": f"已清理所有 {count} 个 WebSocket 连接"
+    }

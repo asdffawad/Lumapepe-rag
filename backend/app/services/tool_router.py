@@ -15,6 +15,7 @@ TOOL_FALLBACK_MESSAGES = {
     "order_query": "抱歉，暂时无法查询订单，请稍后重试或拨打客服热线 400-123-4567",
     "logistics_query": "物流查询服务暂时不可用，请稍后再试",
     "refund_query": "退款服务暂时繁忙，请稍后在我的订单中自助申请",
+    "product_query": "商品查询服务暂时不可用，请稍后再试",
 }
 
 
@@ -45,7 +46,7 @@ class ToolRouter:
             return ToolResult(
                 success=False,
                 error=TOOL_FALLBACK_MESSAGES.get(tool_name, "服务暂时繁忙，请稍后再试"),
-                source=tool.name,
+                source=tool.source,
             )
 
         try:
@@ -60,12 +61,12 @@ class ToolRouter:
             return ToolResult(
                 success=False,
                 error="服务响应超时，请稍后再试",
-                source=tool.name,
+                source=tool.source,
             )
         except Exception as e:
             cb.record_failure()
             return ToolResult(
                 success=False,
                 error="服务异常，请联系客服",
-                source=tool.name,
+                source=tool.source,
             )

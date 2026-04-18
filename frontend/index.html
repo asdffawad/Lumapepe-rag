@@ -560,6 +560,25 @@
     <div id="toast" class="toast"></div>
     
     <script>
+        // ==================== DOM 元素缓存 ====================
+        const dom = {
+            statusDot: document.getElementById('statusDot'),
+            statusText: document.getElementById('statusText'),
+            authBadge: document.getElementById('authBadge'),
+            authText: document.getElementById('authText'),
+            chatMessages: document.getElementById('chatMessages'),
+            messageInput: document.getElementById('messageInput'),
+            sendBtn: document.getElementById('sendBtn'),
+            toast: document.getElementById('toast'),
+            pingCount: document.getElementById('pingCount'),
+            pongCount: document.getElementById('pongCount'),
+            msgSent: document.getElementById('msgSent'),
+            msgReceived: document.getElementById('msgReceived'),
+            lastActivity: document.getElementById('lastActivity'),
+            sessionCount: document.getElementById('sessionCount'),
+            uptime: document.getElementById('uptime'),
+        };
+
         // ==================== 配置 ====================
         const CONFIG = {
             API_BASE: '',
@@ -593,26 +612,173 @@
             uptimeTimer: null,
             accumulatedResponse: '',
             currentPlaceholder: null,
+            // 商品上下文
+            productContext: null,
+            urlSkuId: null,
+            urlSpuId: null,
         };
         
-        // ==================== DOM ====================
-        const dom = {
-            statusDot: document.getElementById('statusDot'),
-            statusText: document.getElementById('statusText'),
-            authBadge: document.getElementById('authBadge'),
-            authText: document.getElementById('authText'),
-            chatMessages: document.getElementById('chatMessages'),
-            messageInput: document.getElementById('messageInput'),
-            sendBtn: document.getElementById('sendBtn'),
-            pingCount: document.getElementById('pingCount'),
-            pongCount: document.getElementById('pongCount'),
-            msgSent: document.getElementById('msgSent'),
-            msgReceived: document.getElementById('msgReceived'),
-            lastActivity: document.getElementById('lastActivity'),
-            sessionCount: document.getElementById('sessionCount'),
-            uptime: document.getElementById('uptime'),
-            toast: document.getElementById('toast'),
-        };
+        // ==================== 商品上下文相关 ====================
+        
+        // 解析URL参数
+        function parseUrlParams() {
+            const params = new URLSearchParams(window.location.search);
+            const skuId = params.get('sku_id');
+            const spuId = params.get('spu_id');
+            
+            state.urlSkuId = skuId ? parseInt(skuId) : null;
+            state.urlSpuId = spuId ? parseInt(spuId) : null;
+            
+            return (state.urlSkuId || state.urlSpuId);
+        }
+        
+        // 加载商品上下文（REST API）
+        async function loadProductContext() {
+            if (!state.urlSkuId && !state.urlSpuId) return null;
+            
+            try {
+                const params = new URLSearchParams();
+                if (state.urlSkuId) params.append('sku_id', state.urlSkuId);
+                if (state.urlSpuId) params.append('spu_id', state.urlSpuId);
+                
+                const response = await fetch(`/api/v1/products/context?${params.toString()}`);
+                const data = await response.json();
+                
+                if (data.success && data.data) {
+                    state.productContext = data.data;
+                    addProductCard(data.data);
+                    return data.data;
+                } else {
+                    console.warn('商品上下文加载失败:', data.error);
+                }
+            } catch (error) {
+                console.error('加载商品上下文失败:', error);
+            }
+            return null;
+        }
+        
+        // 添加商品信息卡片到聊天界面
+        function addProductCard(productContext) {
+            const container = dom.chatMessages;
+            
+            // 避免重复添加
+            const existingCards = container.querySelectorAll('.product-info-card');
+            if (existingCards.length > 0) return;
+            
+            // 构建商品信息HTML
+            let infoHtml = '';
+            
+            // 商品名称和类型标签
+            infoHtml += `<div style="font-weight:700;font-size:14px;margin-bottom:8px;color:var(--accent-light);display:flex;align-items:center;gap:8px">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27,6.96 12,12.01 20.73,6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
+                ${escapeHtml(productContext.product_name || '商品')}
+                <span style="font-weight:400;font-size:11px;color:var(--text-muted);margin-left:4px">
+                    [${productContext.product_type || 'SPU'}]
+                </span>
+            </div>`;
+            
+            // 价格和库存
+            if (productContext.product_type === 'SKU') {
+                if (productContext.sku_price !== undefined && productContext.sku_price !== null) {
+                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
+                        💰 价格: $${productContext.sku_price.toFixed(2)}
+                    </div>`;
+                }
+                if (productContext.sku_stock !== undefined && productContext.sku_stock !== null) {
+                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
+                        📦 库存: ${productContext.sku_stock}
+                    </div>`;
+                }
+                if (productContext.properties) {
+                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
+                        ⚙️ 规格: ${escapeHtml(JSON.stringify(productContext.properties))}
+                    </div>`;
+                }
+                if (productContext.bar_code) {
+                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
+                        📊 条形码: ${escapeHtml(productContext.bar_code)}
+                    </div>`;
+                }
+            } else {
+                if (productContext.price !== undefined && productContext.price !== null) {
+                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
+                        💰 价格: $${productContext.price.toFixed(2)}
+                    </div>`;
+                }
+                if (productContext.stock !== undefined && productContext.stock !== null) {
+                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
+                        📦 库存: ${productContext.stock}
+                    </div>`;
+                }
+                if (productContext.market_price !== undefined && productContext.market_price !== null) {
+                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
+                        🏷️ 市场价: $${productContext.market_price.toFixed(2)}
+                    </div>`;
+                }
+                if (productContext.sales_count !== undefined) {
+                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
+                        🔥 销量: ${productContext.sales_count}
+                    </div>`;
+                }
+            }
+            
+            // 商品简介
+            if (productContext.parsed_introduction && productContext.parsed_introduction.length > 0) {
+                const introTexts = productContext.parsed_introduction
+                    .filter(seg => seg.type === 'text')
+                    .map(seg => seg.content)
+                    .join(' ');
+                if (introTexts) {
+                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin:8px 0;padding:8px;background:var(--bg-card);border-radius:8px;border-left:3px solid var(--accent)">
+                        <div style="font-weight:600;margin-bottom:4px">📝 商品简介:</div>
+                        ${escapeHtml(introTexts.slice(0, 300))}${introTexts.length > 300 ? '...' : ''}
+                    </div>`;
+                }
+            }
+            
+            // 商品详情（简要）
+            if (productContext.parsed_description && productContext.parsed_description.length > 0) {
+                const descTexts = productContext.parsed_description
+                    .filter(seg => seg.type === 'text')
+                    .map(seg => seg.content)
+                    .join(' ');
+                if (descTexts) {
+                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin:8px 0;padding:8px;background:var(--bg-card);border-radius:8px;border-left:3px solid var(--violet)">
+                        <div style="font-weight:600;margin-bottom:4px">📋 商品详情:</div>
+                        ${escapeHtml(descTexts.slice(0, 200))}${descTexts.length > 200 ? '...' : ''}
+                    </div>`;
+                }
+            }
+            
+            // 标记特殊属性
+            const badges = [];
+            if (productContext.has_images) {
+                badges.push(`<span style="font-size:10px;background:var(--success);color:white;padding:2px 8px;border-radius:12px;margin-right:4px">📷 含图片</span>`);
+            }
+            if (productContext.has_html) {
+                badges.push(`<span style="font-size:10px;background:var(--warning);color:white;padding:2px 8px;border-radius:12px;margin-right:4px">📄 HTML</span>`);
+            }
+            if (badges.length > 0) {
+                infoHtml += `<div style="margin-top:8px">${badges.join('')}</div>`;
+            }
+            
+            // 创建卡片
+            const card = document.createElement('div');
+            card.className = 'message assistant product-info-card';
+            card.innerHTML = `<div class="message-content">${infoHtml}</div>
+                <div class="message-meta">
+                    <span>✅ 商品信息已加载 · ID: ${state.urlSkuId || state.urlSpuId}</span>
+                </div>`;
+            container.appendChild(card);
+            container.scrollTop = container.scrollHeight;
+        }
+        
+        // 将商品上下文保存到sessionStorage，供后端RAG流程使用
+        function saveProductContextToSession() {
+            if (state.productContext) {
+                sessionStorage.setItem('product_context', JSON.stringify(state.productContext));
+            }
+        }
         
         // ==================== 工具函数 ====================
         function showToast(msg, type = 'info') {
@@ -695,6 +861,15 @@
                     state.sessionId = data.session_id;
                     dom.sessionCount.textContent = state.sessionId?.substr(0, 8) || '-';
                     state.accumulatedResponse = '';
+                    break;
+                
+                case 'connected':
+                    // WebSocket连接成功，处理商品上下文
+                    if (data.product_context) {
+                        state.productContext = data.product_context;
+                        addProductCard(data.product_context);
+                        showToast(`已加载商品: ${data.product_context.product_name}`, 'success');
+                    }
                     break;
                     
                 case 'error':
@@ -877,6 +1052,15 @@
         async function init() {
             setStatus('connecting', '获取认证...');
             
+            // 解析URL参数
+            const hasProductParams = parseUrlParams();
+            if (hasProductParams) {
+                const info = [];
+                if (state.urlSkuId) info.push(`SKU: ${state.urlSkuId}`);
+                if (state.urlSpuId) info.push(`SPU: ${state.urlSpuId}`);
+                console.log('检测到商品参数:', info.join(', '));
+            }
+            
             // 获取 token
             try {
                 const response = await fetch(`${CONFIG.API_BASE}/api/v1/debug/auth/token`, {
@@ -884,20 +1068,30 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ user_id: state.userId, role: 'user' })
                 });
-                
-                if (!response.ok) throw new Error('认证失败');
-                
+
+                if (!response.ok) {
+                    const errorData = await response.json().catch(() => ({}));
+                    throw new Error(errorData.message || `HTTP ${response.status}: 认证接口返回错误`);
+                }
+
                 const data = await response.json();
+
+                if (!data.token) {
+                    throw new Error('认证接口未返回token');
+                }
+
                 state.token = data.token;
                 setAuthStatus(true, '已认证');
-                
+                console.log('Token acquired successfully:', state.token.substring(0, 30) + '...');
+
             } catch (err) {
                 console.error('Auth error:', err);
                 setAuthStatus(false, '认证失败');
                 showToast('认证失败: ' + err.message, 'error');
-                return;
+                return;  // 认证失败，停止连接
             }
-            
+
+            console.log('Token obtained, connecting to WebSocket...');
             connectWebSocket();
         }
         
@@ -906,17 +1100,36 @@
                 state.ws.close();
                 state.ws = null;
             }
-            
+
+            // 确保 token 存在
+            if (!state.token) {
+                console.error('No token available, cannot connect WebSocket');
+                setStatus('error', '未获取到认证令牌');
+                showToast('请先获取认证令牌', 'error');
+                return;
+            }
+
             setStatus('connecting', '连接中...');
-            
+
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const host = window.location.host;
-            let wsUrl = `${protocol}//${host}/ws/chat?user_id=${encodeURIComponent(state.userId)}&token=${encodeURIComponent(state.token)}`;
-            
+            // 构建WebSocket URL（仅传递必要的参数）
+            let wsUrl = `${protocol}//${host}/ws/chat?token=${encodeURIComponent(state.token)}`;
+
+            // 传递 session_id（如果存在）
             if (state.sessionId) {
                 wsUrl += `&session_id=${encodeURIComponent(state.sessionId)}`;
             }
-            
+
+            // 传递URL中的商品参数到WebSocket
+            if (state.urlSkuId) {
+                wsUrl += `&sku_id=${encodeURIComponent(state.urlSkuId)}`;
+            }
+            if (state.urlSpuId) {
+                wsUrl += `&spu_id=${encodeURIComponent(state.urlSpuId)}`;
+            }
+
+            console.log('Connecting to WebSocket:', wsUrl);
             state.ws = new WebSocket(wsUrl);
             
             state.ws.onopen = () => {

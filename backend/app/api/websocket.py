@@ -48,7 +48,12 @@ async def get_session_service() -> SessionService | None:
 
 
 @router.websocket("/ws/chat")
-async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query(None)):
+async def websocket_chat(
+    websocket: WebSocket,
+    session_id: Optional[str] = Query(None),
+    sku_id: Optional[int] = Query(None),
+    spu_id: Optional[int] = Query(None),
+):
     """
     WebSocket 聊天端点（企业级）
 
@@ -60,6 +65,8 @@ async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query
 
     Query 参数:
       - session_id: 会话ID (可选，不提供则自动创建)
+      - sku_id: 商品SKU ID (可选，从商品详情页进入时传递)
+      - spu_id: 商品SPU ID (可选，从商品详情页进入时传递)
     """
     from app.middleware.auth import JWTError, verify_ws_token
     from app.logging_config import get_logger
@@ -127,14 +134,40 @@ async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query
         await websocket.close(code=4002 if error_code == "TOO_MANY_CONNECTIONS" else 503, reason=error_msg)
         return
 
-    # 5. 发送连接成功消息
-    await websocket.send_json({
+    # 5. 发送连接成功消息（包含商品上下文信息）
+    connected_msg = {
         "type": "connected",
         "session_id": session_id,
         "user_id": user_id,
-    })
+    }
+
+    # 如果传入了商品ID，预先查询并返回商品信息
+    if sku_id or spu_id:
+        from app.services.product_context_service import get_product_context_service
+        product_svc = get_product_context_service()
+        product_ctx = await product_svc.get_product_context(sku_id=sku_id, spu_id=spu_id)
+        if product_ctx:
+            # 构建前端可用的商品上下文（包含解析后的信息）
+            parsed_introduction = product_ctx.get("parsed_introduction", [])
+            parsed_description = product_ctx.get("parsed_description", [])
+            
+            connected_msg["product_context"] = {
+                "product_name": product_ctx.get("product_name"),
+                "product_type": product_ctx.get("product_type"),
+                "sku_id": product_ctx.get("sku_id"),
+                "spu_id": product_ctx.get("spu_id"),
+                "price": product_ctx.get("sku_price") or product_ctx.get("price"),
+                "stock": product_ctx.get("sku_stock") if product_ctx.get("sku_stock") is not None 
+                        else product_ctx.get("stock"),
+                "parsed_introduction": parsed_introduction,
+                "parsed_description": parsed_description,
+                "has_images": product_ctx.get("has_images", False),
+                "has_html": product_ctx.get("has_html", False),
+            }
+
+    await websocket.send_json(connected_msg)
     _ws_logger.info("Connection established and 'connected' message sent",
-                    extra={"session_id": session_id, "user_id": user_id})
+                    extra={"session_id": session_id, "user_id": user_id, "has_product_context": "product_context" in connected_msg})
 
     try:
         while True:
@@ -185,6 +218,8 @@ async def websocket_chat(websocket: WebSocket, session_id: Optional[str] = Query
                     content=data.get("content", ""),
                     provided_session_id=data.get("session_id"),
                     request_id=request_id,
+                    sku_id=websocket.query_params.get("sku_id") and int(websocket.query_params.get("sku_id")) or None,
+                    spu_id=websocket.query_params.get("spu_id") and int(websocket.query_params.get("spu_id")) or None,
                 )
 
             elif msg_type == "history":
@@ -257,12 +292,14 @@ async def handle_message(
     content: str,
     provided_session_id: Optional[str],
     request_id: str,
+    sku_id: Optional[int] = None,
+    spu_id: Optional[int] = None,
 ) -> None:
     """处理聊天消息，流式响应"""
     orchestrator = get_rag_orchestrator()
     intent_classifier = get_intent_classifier()
     session_svc = await get_session_service()
-    
+
     # 检查数据库是否可用
     if session_svc is None:
         await websocket.send_json({
@@ -271,7 +308,7 @@ async def handle_message(
             "message": "会话服务不可用（数据库未连接）"
         })
         return
-    
+
     # 如果提供了 session_id，验证归属
     target_session_id = provided_session_id or session_id
     if provided_session_id:
@@ -283,14 +320,30 @@ async def handle_message(
                 "message": "无权访问该会话"
             })
             return
-    
+
     try:
         ctx = await session_svc.get_or_create_session(
             session_id=target_session_id,
             user_id=user_id,
+            sku_id=sku_id,
+            spu_id=spu_id,
         )
         history = ctx.history[-5:] if ctx.history else []
-        
+
+        # 注入商品上下文到历史记录（作为系统消息）
+        if ctx.product_context:
+            from app.services.product_context_service import get_product_context_service
+            product_svc = get_product_context_service()
+            system_msg = product_svc.format_system_prompt(ctx.product_context)
+            if system_msg:
+                # 插入到历史记录最前面
+                history.insert(0, {
+                    "role": "system",
+                    "content": system_msg,
+                    "intent": "product_context"
+                })
+                _logger.info("Product context injected into conversation", extra={"product": ctx.product_context.get("product_name")})
+
         # 意图分类
         intent_result = await intent_classifier.classify(content, history)
         intent = intent_result.intent

@@ -9,7 +9,9 @@ from datetime import datetime
 
 from app.database.order import OrderRecord, OrderRepository
 from app.services.tools.base import ToolResult
-from app.services.tools import OrderTool, LogisticsTool, RefundTool
+from app.services.tools.order_tool import OrderTool
+from app.services.tools.logistics_tool import LogisticsTool
+from app.services.tools.refund_tool import RefundTool
 from app.services.tool_router import ToolRouter
 from app.services.rag_orchestrator import RAGOrchestrator
 from app.services.query_rewriter import MockQueryRewriter
@@ -174,7 +176,7 @@ class TestOrderTool:
             "created_at": datetime(2026, 4, 1),
             "paid_at": None, "shipped_at": None, "delivered_at": None,
         })
-        with patch("app.services.tools._get_db_pool", return_value=pool):
+        with patch("app.services.tools.base.DatabaseMixin._get_db_pool", return_value=pool):
             result = await tool.execute({"user_id": "test-user"})
         assert result.success is True
         assert result.source == "订单系统"
@@ -184,7 +186,7 @@ class TestOrderTool:
     @pytest.mark.asyncio
     async def test_order_tool_db_not_init(self):
         tool = OrderTool()
-        with patch("app.services.tools._get_db_pool", side_effect=RuntimeError("not init")):
+        with patch("app.services.tools.base.DatabaseMixin._get_db_pool", side_effect=RuntimeError("not init")):
             result = await tool.execute({"user_id": "test-user"})
         assert result.success is False
         assert "未初始化" in result.error
@@ -212,7 +214,7 @@ class TestRefundTool:
             "paid_at": None, "shipped_at": None,
             "delivered_at": datetime(2026, 4, 3),
         })
-        with patch("app.services.tools._get_db_pool", return_value=pool):
+        with patch("app.services.tools.base.DatabaseMixin._get_db_pool", return_value=pool):
             result = await tool.execute({"user_id": "test-user", "order_id": "ORD001"})
         assert result.success is True
         assert result.data["can_refund"] is True

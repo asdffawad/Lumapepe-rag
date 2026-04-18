@@ -67,9 +67,9 @@ class SlidingWindowLimiter:
                 pipe.zadd(redis_key, {unique_id: now})
                 pipe.zcard(redis_key)
                 pipe.expire(redis_key, self._window + 1)
-                pipe.execute()
+                results = await pipe.execute()
 
-                count = r.zcard(redis_key)
+                count = results[2]  # zcard 的结果在索引 2
                 allowed = count <= self._max
                 remaining = max(0, self._max - count)
                 return allowed, remaining

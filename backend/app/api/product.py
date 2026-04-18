@@ -339,3 +339,51 @@ async def get_dict_stats(
             "is_ready": service.is_ready,
         },
     }
+
+
+@router.get("/context", response_model=dict)
+async def get_product_context_by_id(
+    sku_id: int | None = Query(default=None, description="SKU ID"),
+    spu_id: int | None = Query(default=None, description="SPU ID"),
+) -> dict:
+    """
+    通过SKU或SPU ID获取商品上下文（用于前端URL参数测试）
+
+    Example:
+        GET /products/context?sku_id=123
+        GET /products/context?spu_id=456
+    """
+    from app.services.product_context_service import get_product_context_service
+
+    if not sku_id and not spu_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="必须提供 sku_id 或 spu_id",
+        )
+
+    try:
+        context_service = get_product_context_service()
+        context = await context_service.get_product_context(
+            sku_id=sku_id,
+            spu_id=spu_id,
+        )
+
+        if context is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="商品不存在",
+            )
+
+        return {
+            "success": True,
+            "data": context,
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        _logger.error("Get product context failed", extra={"error": str(e)})
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"查询失败: {str(e)}",
+        )

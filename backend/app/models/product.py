@@ -47,13 +47,19 @@ class SkuInfo:
     id: int
     spu_id: int
     properties: str  # JSON字符串
-    price: float
-    stock: int
+    price: Optional[float] = None
+    market_price: Optional[float] = None
+    cost_price: Optional[float] = None
+    suggest_sell_price: Optional[float] = None
     bar_code: Optional[str] = None
-    supply_external_sku: Optional[str] = None  # 外部SKU编码
+    supply_external_sku: Optional[str] = None  # 供应链SKU
     pic_url: Optional[str] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    stock: Optional[int] = None
+    weight: Optional[float] = None  # 重量 kg
+    volume: Optional[float] = None  # 体积 m^3
+    sales_count: Optional[int] = None
+    create_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
 
     def to_dict(self) -> dict:
         return {
@@ -61,10 +67,18 @@ class SkuInfo:
             "spu_id": self.spu_id,
             "properties": self.properties,
             "price": self.price,
-            "stock": self.stock,
+            "market_price": self.market_price,
+            "cost_price": self.cost_price,
+            "suggest_sell_price": self.suggest_sell_price,
             "bar_code": self.bar_code,
             "supply_external_sku": self.supply_external_sku,
             "pic_url": self.pic_url,
+            "stock": self.stock,
+            "weight": self.weight,
+            "volume": self.volume,
+            "sales_count": self.sales_count,
+            "create_time": self.create_time.isoformat() if self.create_time else None,
+            "update_time": self.update_time.isoformat() if self.update_time else None,
         }
 
 
@@ -78,10 +92,20 @@ class SpuInfo:
     description: Optional[str] = None
     category_id: Optional[int] = None
     brand_id: Optional[int] = None
-    price: Optional[float] = None
+    pic_url: Optional[str] = None
+    slider_pic_urls: Optional[str] = None  # 轮播图，逗号分隔
+    status: Optional[int] = None  # 1上架 0下架
+    spec_type: Optional[bool] = None  # 0单规格 1多规格
+    price: Optional[float] = None  # 单位：分
+    market_price: Optional[float] = None  # 单位：分
+    cost_price: Optional[float] = None  # 单位：分
     stock: Optional[int] = None
-    created_at: Optional[datetime] = None
-    updated_at: Optional[datetime] = None
+    sales_count: Optional[int] = None
+    virtual_sales_count: Optional[int] = None
+    browse_count: Optional[int] = None
+    sort: Optional[int] = None
+    create_time: Optional[datetime] = None
+    update_time: Optional[datetime] = None
 
     def to_dict(self) -> dict:
         return {
@@ -92,8 +116,20 @@ class SpuInfo:
             "description": self.description,
             "category_id": self.category_id,
             "brand_id": self.brand_id,
+            "pic_url": self.pic_url,
+            "slider_pic_urls": self.slider_pic_urls,
+            "status": self.status,
+            "spec_type": self.spec_type,
             "price": self.price,
+            "market_price": self.market_price,
+            "cost_price": self.cost_price,
             "stock": self.stock,
+            "sales_count": self.sales_count,
+            "virtual_sales_count": self.virtual_sales_count,
+            "browse_count": self.browse_count,
+            "sort": self.sort,
+            "create_time": self.create_time.isoformat() if self.create_time else None,
+            "update_time": self.update_time.isoformat() if self.update_time else None,
         }
 
 

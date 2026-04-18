@@ -54,7 +54,7 @@ async def main_async(args):
         # 构建字典
         _logger.info("Building product dictionary...")
         product_dict: ProductDict = await build_product_dict(
-            repo,
+            pool,
             output_path=args.output,
             fuzzy_threshold=args.threshold,
             save=False,  # 我们手动保存

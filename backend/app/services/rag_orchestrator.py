@@ -2,14 +2,14 @@
 RAG Orchestrator - RAG 管道唯一入口
 严格遵循 rag-orchestrator-architecture.mdc 规范
 
-调度流程: Query改写 -> 向量检索 -> 重排 -> Prompt构建 -> LLM生成
+调度流程: 意图分类 -> 商品检索(仅product_qa) -> Query改写 -> 向量检索 -> 重排 -> Prompt构建 -> LLM生成
 各子模块职责单一、可独立测试和替换
 """
 from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, AsyncGenerator
 
 from app.config import RAGConfig
@@ -21,6 +21,7 @@ from app.services.prompt_builder import PromptBuilder, Prompt
 from app.services.llm_generator import LLMGenerator, GenerationResult, StreamChunk
 
 if TYPE_CHECKING:
+    from app.services.product_service import ProductService
     from app.services.tools.base import ToolResult
 
 _gen_logger = get_logger("rag.orchestrator")
@@ -36,6 +37,16 @@ class RAGResult:
     latency_ms: int
     rewritten_query: str
     tool_result: "ToolResult | None" = None
+    product_info: "dict | None" = None  # 商品检索结果
+
+
+@dataclass
+class ProductContext:
+    """商品检索上下文"""
+    product_name: str = ""
+    product_detail: str = ""
+    match_type: str = ""
+    confidence: float = 0.0
 
 
 class RAGError(Exception):
@@ -45,6 +56,11 @@ class RAGError(Exception):
 class RAGOrchestrator:
     """
     RAG 管道唯一入口，所有子模块通过构造器注入
+
+    支持的意图及处理策略：
+    - product_qa: 商品检索 + 向量检索 + LLM 生成
+    - order_query/refund_return/logistics_query: 工具调用 + LLM 生成
+    - 其他意图: 仅向量检索 + LLM 生成
     """
 
     def __init__(
@@ -55,6 +71,7 @@ class RAGOrchestrator:
         prompt_builder: PromptBuilder,
         generator: LLMGenerator,
         config: RAGConfig,
+        product_service: "ProductService | None" = None,
     ):
         self._rewriter = rewriter
         self._retriever = retriever
@@ -62,6 +79,7 @@ class RAGOrchestrator:
         self._prompt_builder = prompt_builder
         self._generator = generator
         self._config = config
+        self._product_service = product_service
 
     async def run(
         self,
@@ -76,8 +94,13 @@ class RAGOrchestrator:
         """
         start_time = time.monotonic()
         total_latency = {"value": 0}
+        product_context: "ProductContext | None" = None
 
         try:
+            # Step 0: 商品检索（仅 product_qa 意图）
+            if intent == "product_qa" and self._product_service:
+                product_context = await self._timed_product_search(query, total_latency)
+
             # Step 1: Query 改写
             rewritten = await self._timed_rewrite(query, history, total_latency)
 
@@ -89,12 +112,12 @@ class RAGOrchestrator:
                 rewritten.rewritten, candidates, total_latency, intent=intent
             )
 
-            # Step 3.5: 工具分流（order_query / refund_return / logistics）
+            # Step 3.5: 工具分流（order_query / refund_return / logistics / product_query）
             tool_result: "ToolResult | None" = None
-            if intent in ("order_query", "refund_return", "logistics_query") and user_id:
+            if intent in ("order_query", "refund_return", "logistics_query", "product_query") and (user_id or intent == "product_query"):
                 tool_result = await self._call_tool(
                     intent,
-                    {"user_id": user_id, "_query": query},
+                    {"user_id": user_id if user_id else "", "_query": query},
                     request_id,
                 )
 
@@ -105,6 +128,7 @@ class RAGOrchestrator:
                 intent=intent,
                 history=history,
                 tool_result=tool_result,
+                product_context=product_context,
             )
 
             # Step 5: LLM 生成
@@ -118,12 +142,17 @@ class RAGOrchestrator:
                 content=gen_result.content,
                 intent=intent,
                 sources=[d.source for d in reranked],
-                # 引用改为从检索文档来源提取（而非从 LLM 回复中无依据地提取）
                 citations=[d.source for d in reranked[:5]],
                 tokens_used=gen_result.tokens_used,
                 latency_ms=total_latency["value"],
                 rewritten_query=rewritten.rewritten,
                 tool_result=tool_result,
+                product_info={
+                    "product_name": product_context.product_name if product_context else "",
+                    "product_detail": product_context.product_detail if product_context else "",
+                    "match_type": product_context.match_type if product_context else "",
+                    "confidence": product_context.confidence if product_context else 0.0,
+                } if product_context else None,
             )
 
         except asyncio.TimeoutError:
@@ -144,6 +173,12 @@ class RAGOrchestrator:
         兼容字符串输出（用于错误消息）
         """
         try:
+            product_context: "ProductContext | None" = None
+
+            # Step 0: 商品检索（仅 product_qa 意图）
+            if intent == "product_qa" and self._product_service:
+                product_context = await self._timed_product_search(query, {"value": 0})
+
             # 前4步同同步模式
             rewritten = await asyncio.wait_for(
                 self._rewriter.rewrite(query, history),
@@ -169,12 +204,12 @@ class RAGOrchestrator:
                 timeout=self._config.rerank_timeout_ms / 1000,
             )
 
-            # 工具分流（仅在有 user_id 时调用）
+            # 工具分流（仅在有 user_id 时调用，或 product_query）
             tool_result = None
-            if intent in ("order_query", "refund_return", "logistics_query") and user_id:
+            if intent in ("order_query", "refund_return", "logistics_query", "product_query") and (user_id or intent == "product_query"):
                 tool_result = await self._call_tool(
                     intent,
-                    {"user_id": user_id, "_query": rewritten.rewritten},
+                    {"user_id": user_id if user_id else "", "_query": rewritten.rewritten},
                     request_id,
                 )
 
@@ -184,6 +219,7 @@ class RAGOrchestrator:
                 intent=intent,
                 history=history,
                 tool_result=tool_result,
+                product_context=product_context,
             )
 
             # 流式生成（传入真实检索来源，而非从 LLM 回复无依据提取）
@@ -264,6 +300,58 @@ class RAGOrchestrator:
                 for d in candidates[: self._config.rerank_top_k]
             ]
 
+    async def _timed_product_search(
+        self, query: str, latency: dict
+    ) -> "ProductContext | None":
+        """商品检索（带超时保护）"""
+        start = time.monotonic()
+        try:
+            if not self._product_service:
+                return None
+
+            result = await asyncio.wait_for(
+                self._product_service.search_product(query),
+                timeout=self._config.retrieve_timeout_ms / 1000,
+            )
+            latency["value"] += int((time.monotonic() - start) * 1000)
+
+            if result and result.detail:
+                detail = result.detail
+                product_name = ""
+                product_detail = ""
+
+                if detail.spu:
+                    product_name = detail.spu.name or ""
+                    # 组装商品详情
+                    props = {}
+                    if detail.spu.properties:
+                        import json
+                        try:
+                            props = json.loads(detail.spu.properties) if isinstance(detail.spu.properties, str) else detail.spu.properties
+                        except Exception:
+                            pass
+                    product_detail = f"{detail.spu.name or ''} | 价格: ¥{detail.spu.price or 0:.2f}"
+                    if props:
+                        key_props = [f"{k}: {v}" for k, v in props.items() if k in ("规格", "颜色", "内存", "存储")]
+                        if key_props:
+                            product_detail += f" | {' | '.join(key_props)}"
+
+                return ProductContext(
+                    product_name=product_name,
+                    product_detail=product_detail,
+                    match_type=result.resolve_result.match_type.value if result.resolve_result else "",
+                    confidence=result.resolve_result.confidence if result.resolve_result else 0.0,
+                )
+            return None
+        except asyncio.TimeoutError:
+            latency["value"] += int((time.monotonic() - start) * 1000)
+            _gen_logger.warning("Product search timeout", extra={"query": query[:50]})
+            return None
+        except Exception as e:
+            latency["value"] += int((time.monotonic() - start) * 1000)
+            _gen_logger.error("Product search failed", extra={"query": query[:50], "error": str(e)})
+            return None
+
     async def _timed_generate(
         self, prompt: Prompt, request_id: str | None, latency: dict
     ) -> GenerationResult:
@@ -313,39 +401,70 @@ class RAGOrchestrator:
             "order_query": "order_query",
             "refund_return": "refund_query",
             "logistics_query": "logistics_query",
+            "product_query": "product_query",
         }
         tool_name = tool_name_map.get(intent)
         if not tool_name:
             return None
 
-        # 从 query 中提取 order_id（如用户提及了具体订单号）
+        # 从 query 中提取相关信息
         query = params.get("_query", "")
-        extracted_order_id = None
-        if query:
+        user_id = params.get("user_id", "")
+        
+        # 构建工具参数（基础参数）
+        tool_params = {}
+        
+        # === 商品查询参数提取 ===
+        if intent == "product_query":
+            # 商品查询不需要user_id
+            # 尝试从查询中提取商品相关信息
             import re
-
-            # 优先匹配：以订单号格式开头（独立行或开头无其他词）
-            # 例如：ORD20260001、SF1234567890
-            m = re.search(r"\b([A-Z]{2,4}[0-9]{6,})\b", query, re.IGNORECASE)
-            if not m:
-                # 兜底：从"订单"或"单号"关键词附近贪婪匹配
-                # 处理 "订单ORD20260001" 或 "订单ORD20260001发货了吗" 等各种格式
-                m = re.search(
-                    r"订单.*?([A-Z]{2,4}[0-9]{6,})",
-                    query, re.IGNORECASE | re.DOTALL
-                )
-            if not m:
-                # 纯订单号模式：独立数字字母组合（8-32位）
-                m = re.search(r"\b([A-Z0-9]{8,32})\b", query)
-            if m:
-                extracted_order_id = m.group(1).upper()
-
-        # 构建工具参数（优先用提取的 order_id）
-        tool_params = {
-            "user_id": params.get("user_id", ""),
-        }
-        if extracted_order_id:
-            tool_params["order_id"] = extracted_order_id
+            
+            # 1. 提取条形码（通常是数字，长度8-20位）
+            barcode_match = re.search(r'条形码[：:]\s*(\d{8,20})', query)
+            if not barcode_match:
+                barcode_match = re.search(r'\b(\d{8,20})\b', query)
+            if barcode_match:
+                tool_params["barcode"] = barcode_match.group(1)
+            
+            # 2. 提取商品ID（通常是数字）
+            product_id_match = re.search(r'商品ID[：:]\s*(\d+)', query)
+            if not product_id_match:
+                product_id_match = re.search(r'\b商品(?:号|ID)?[：:\s]*(\d+)\b', query)
+            if product_id_match:
+                tool_params["product_id"] = int(product_id_match.group(1))
+            
+            # 3. 商品名称/关键词：直接传递整个查询（让工具内部处理）
+            # 如果查询中包含明确的商品名称短语，可以提取
+            # 这里简化处理：传递原始查询，让工具层进一步解析
+            if not tool_params:
+                # 没有提取到具体ID/条形码，传递整个查询作为商品名称
+                tool_params["product_name"] = query.strip()
+        
+        # === 订单相关工具参数提取 ===
+        else:
+            # 需要user_id
+            tool_params["user_id"] = user_id
+            
+            # 提取订单号
+            extracted_order_id = None
+            if query:
+                # 优先匹配：以订单号格式开头（独立行或开头无其他词）
+                m = re.search(r"\b([A-Z]{2,4}[0-9]{6,})\b", query, re.IGNORECASE)
+                if not m:
+                    # 兜底：从"订单"或"单号"关键词附近贪婪匹配
+                    m = re.search(
+                        r"订单.*?([A-Z]{2,4}[0-9]{6,})",
+                        query, re.IGNORECASE | re.DOTALL
+                    )
+                if not m:
+                    # 纯订单号模式：独立数字字母组合（8-32位）
+                    m = re.search(r"\b([A-Z0-9]{8,32})\b", query)
+                if m:
+                    extracted_order_id = m.group(1).upper()
+            
+            if extracted_order_id:
+                tool_params["order_id"] = extracted_order_id
 
         try:
             router = ToolRouter()

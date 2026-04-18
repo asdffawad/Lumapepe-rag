@@ -61,7 +61,7 @@ class ProductResolver:
     MATCH_WEIGHTS = {
         MatchType.BARCODE: 1.0,
         MatchType.ALIAS: 0.9,
-        MatchType.SKU_NAME: 0.85,
+        MatchType.SKU_CODE: 0.85,
         MatchType.SPU_KEYWORD: 0.8,
         MatchType.SPU_NAME: 0.75,
     }

@@ -96,15 +96,15 @@ class ProductDictBuilder:
     def __init__(
         self,
         repo: ProductRepository,
-        fuzzy_match_threshold: int = 80,
+        fuzzy_threshold: int = 80,
     ):
         """
         Args:
             repo: 商品Repository实例
-            fuzzy_match_threshold: 模糊匹配阈值（用于别名去重）
+            fuzzy_threshold: 模糊匹配阈值（用于别名去重）
         """
         self._repo = repo
-        self._fuzzy_threshold = fuzzy_match_threshold
+        self._fuzzy_threshold = fuzzy_threshold
 
     async def build(self) -> ProductDict:
         """
