@@ -16,6 +16,9 @@ import redis.asyncio as redis
 from app.database.message import MessageRepository
 from app.database.session import SessionRecord, SessionRepository
 from app.cache.session_cache import SessionCache
+from app.logging_config import get_logger
+
+_logger = get_logger("session.service")
 
 
 @dataclass
@@ -25,6 +28,7 @@ class SessionContext:
     intent: Optional[str]
     history: list[dict]
     last_query_hash: Optional[str]
+    product_context: Optional[dict] = None  # 商品上下文 {sku_id, spu_id, product_info}
 
 
 class SessionService:
@@ -38,11 +42,26 @@ class SessionService:
         self,
         session_id: Optional[str],
         user_id: str,
+        sku_id: Optional[int] = None,
+        spu_id: Optional[int] = None,
     ) -> SessionContext:
         """获取或创建会话，返回 SessionContext。
 
         安全验证：session_id 已存在时，必须属于同一个 user_id，防止跨用户访问。
+
+        商品上下文：如果提供了 sku_id 或 spu_id，会查询并注入商品信息到会话上下文。
         """
+        product_context = None
+
+        # 如果提供了商品ID，查询商品上下文
+        if sku_id or spu_id:
+            from app.services.product_context_service import get_product_context_service
+            product_svc = get_product_context_service()
+            product_context = await product_svc.get_product_context(
+                sku_id=sku_id, spu_id=spu_id
+            )
+            _logger.info("Product context loaded", extra={"sku_id": sku_id, "spu_id": spu_id})
+
         if session_id:
             # 尝试从缓存读取
             cached = await self._cache.get(session_id)
@@ -59,6 +78,7 @@ class SessionService:
                     intent=cached.get("intent"),
                     history=history,
                     last_query_hash=cached.get("last_query_hash"),
+                    product_context=product_context,
                 )
             # 尝试从 DB 读取
             db_session = await self._session_repo.find_by_id(session_id)
@@ -84,6 +104,7 @@ class SessionService:
                     intent=db_session.intent,
                     history=history_dicts,
                     last_query_hash=db_session.summary,
+                    product_context=product_context,
                 )
 
         # 创建新会话
@@ -99,6 +120,7 @@ class SessionService:
             intent=None,
             history=[],
             last_query_hash=None,
+            product_context=product_context,
         )
 
     async def add_message(
