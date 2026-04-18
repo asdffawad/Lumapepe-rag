@@ -202,14 +202,14 @@ class ProductContextService:
         # 使用解析后的商品简介（纯文本）
         if product_context.get("parsed_introduction"):
             intro_segments = product_context["parsed_introduction"]
-            intro_texts = [seg.content for seg in intro_segments if seg.type == "text"]
+            intro_texts = [seg["content"] for seg in intro_segments if seg.get("type") == "text"]
             if intro_texts:
                 prompt_parts.append(f"商品简介: {' '.join(intro_texts)}")
-        
+
         # 使用解析后的商品详情（纯文本）
         if product_context.get("parsed_description"):
             desc_segments = product_context["parsed_description"]
-            desc_texts = [seg.content for seg in desc_segments if seg.type == "text"]
+            desc_texts = [seg["content"] for seg in desc_segments if seg.get("type") == "text"]
             if desc_texts:
                 desc = ' '.join(desc_texts)
                 if len(desc) > 500:
