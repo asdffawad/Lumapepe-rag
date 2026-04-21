@@ -186,13 +186,13 @@ async def get_document(doc_id: int):
 async def reindex_document(doc_id: int):
     """
     重新索引指定文档：
-    1. 从 Milvus 删除该 doc_id 的所有向量 chunk
+    1. 从 Qdrant 删除该 doc_id 的所有向量 chunk
     2. 重新分块、向量化、入库
     3. 更新 MySQL documents 表状态
     """
     from app.database.connection import get_db_pool
     from app.utils.chunker import TextChunker
-    from app.vectorstore.milvus_client import MilvusClient
+    from app.vectorstore.qdrant_adapter import QdrantClient
     from app.services.embedding_service import EmbeddingService
 
     pool = get_db_pool()
@@ -214,14 +214,14 @@ async def reindex_document(doc_id: int):
             title = doc["title"]
             doc_type = doc["doc_type"]
 
-    # 2. 获取 Milvus client
+    # 2. 获取 Qdrant client
     from app.main import app as _app
-    milvus: MilvusClient = getattr(_app.state, "milvus_client", None)
-    if milvus is None or not await milvus.async_health_check():
-        raise HTTPException(status_code=503, detail={"code": "MILVUS_UNAVAILABLE", "message": "Milvus 未连接"})
+    qdrant: QdrantClient = getattr(_app.state, "milvus_client", None)
+    if qdrant is None or not await qdrant.async_health_check():
+        raise HTTPException(status_code=503, detail={"code": "QDRANT_UNAVAILABLE", "message": "Qdrant 未连接"})
 
     # 3. 删除旧向量
-    deleted = await milvus.delete_by_doc_id(doc_id)
+    deleted = await qdrant.delete_by_doc_id(doc_id)
 
     # 4. 重新摄取：从 documents 表中取出 content（存储在 JSON 字段中）
     #    MySQL JSON 字段返回 str，需要解析
@@ -245,7 +245,7 @@ async def reindex_document(doc_id: int):
     vectors = await embed_service.embed(texts)
 
     ids = [f"{c.doc_id}_{c.chunk_index}" for c in chunks]
-    await milvus.insert(
+    await qdrant.insert(
         vectors=vectors,
         contents=texts,
         metadata=[{} for _ in chunks],
@@ -280,7 +280,7 @@ async def create_document(request: DocumentCreateRequest):
     """
     from app.database.connection import get_db_pool
     from app.utils.chunker import TextChunker
-    from app.vectorstore.milvus_client import MilvusClient
+    from app.vectorstore.qdrant_adapter import QdrantClient
     from app.services.embedding_service import EmbeddingService
 
     pool = get_db_pool()
@@ -291,11 +291,11 @@ async def create_document(request: DocumentCreateRequest):
     content_str = json.dumps(request.content, ensure_ascii=False, sort_keys=True)
     file_hash = hashlib.sha256(content_str.encode()).hexdigest()
 
-    # 2. 检查是否已存在
+    # 2. 检查是否已存在（排除已删除的记录，允许重新上传同名文件）
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, status FROM documents WHERE file_hash = %s",
+                "SELECT id, status FROM documents WHERE file_hash = %s AND status != 'deleted'",
                 (file_hash,),
             )
             existing = await cur.fetchone()
@@ -305,11 +305,11 @@ async def create_document(request: DocumentCreateRequest):
                     detail={"code": "DUPLICATE", "message": f"文档已存在 (id={existing[0]})，请使用 PUT 更新"},
                 )
 
-    # 3. 获取 Milvus client
+    # 3. 获取 Qdrant client
     from app.main import app as _app
-    milvus: MilvusClient = getattr(_app.state, "milvus_client", None)
-    if milvus is None or not await milvus.async_health_check():
-        raise HTTPException(status_code=503, detail={"code": "MILVUS_UNAVAILABLE", "message": "Milvus 未连接"})
+    qdrant: QdrantClient = getattr(_app.state, "milvus_client", None)
+    if qdrant is None or not await qdrant.async_health_check():
+        raise HTTPException(status_code=503, detail={"code": "QDRANT_UNAVAILABLE", "message": "Qdrant 未连接"})
 
     # 4. 写入 MySQL（pending 状态）
     async with pool.acquire() as conn:
@@ -329,7 +329,7 @@ async def create_document(request: DocumentCreateRequest):
     embed_service = EmbeddingService.get_instance()
     vectors = await embed_service.embed(texts)
 
-    await milvus.insert(
+    await qdrant.insert(
         vectors=vectors,
         contents=texts,
         metadata=[{} for _ in chunks],
@@ -406,14 +406,14 @@ async def upload_document(
     finally:
         _os.unlink(tmp_path)
 
-    # 计算 hash 去重
+    # 计算 hash 去重（排除已删除记录，允许重新上传同名文件）
     file_hash = hashlib.sha256(content).hexdigest()
 
     # 检查是否已存在
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, status FROM documents WHERE file_hash = %s",
+                "SELECT id, status FROM documents WHERE file_hash = %s AND status != 'deleted'",
                 (file_hash,),
             )
             existing = await cur.fetchone()
@@ -504,7 +504,7 @@ async def update_document(doc_id: int, request: DocumentUpdateRequest):
     """
     from app.database.connection import get_db_pool
     from app.utils.chunker import TextChunker
-    from app.vectorstore.milvus_client import MilvusClient
+    from app.vectorstore.qdrant_adapter import QdrantClient
     from app.services.embedding_service import EmbeddingService
 
     pool = get_db_pool()
@@ -525,14 +525,14 @@ async def update_document(doc_id: int, request: DocumentUpdateRequest):
             if isinstance(cv, str):
                 doc["content_raw"] = _json.loads(cv)
 
-    # 2. 获取 Milvus client
+    # 2. 获取 Qdrant client
     from app.main import app as _app
-    milvus: MilvusClient = getattr(_app.state, "milvus_client", None)
-    if milvus is None or not await milvus.async_health_check():
-        raise HTTPException(status_code=503, detail={"code": "MILVUS_UNAVAILABLE", "message": "Milvus 未连接"})
+    qdrant: QdrantClient = getattr(_app.state, "milvus_client", None)
+    if qdrant is None or not await qdrant.async_health_check():
+        raise HTTPException(status_code=503, detail={"code": "QDRANT_UNAVAILABLE", "message": "Qdrant 未连接"})
 
     # 3. 删除旧向量
-    deleted = await milvus.delete_by_doc_id(doc_id)
+    deleted = await qdrant.delete_by_doc_id(doc_id)
 
     # 4. 合并新旧内容
     new_content = request.content or {}
@@ -554,7 +554,7 @@ async def update_document(doc_id: int, request: DocumentUpdateRequest):
     embed_service = EmbeddingService.get_instance()
     vectors = await embed_service.embed(texts)
 
-    await milvus.insert(
+    await qdrant.insert(
         vectors=vectors,
         contents=texts,
         metadata=[{} for _ in chunks],
@@ -591,11 +591,11 @@ async def update_document(doc_id: int, request: DocumentUpdateRequest):
 @router.delete("/documents/{doc_id}")
 async def delete_document(doc_id: int):
     """
-    删除指定文档：删除 Milvus 向量 + MySQL 记录（软删除）。
+    删除指定文档：删除 Qdrant 向量 + MySQL 记录（软删除）。
     删除后可通过重新 POST 创建同名文档。
     """
     from app.database.connection import get_db_pool
-    from app.vectorstore.milvus_client import MilvusClient
+    from app.vectorstore.qdrant_adapter import QdrantClient
 
     pool = get_db_pool()
     if pool is None:
@@ -609,12 +609,13 @@ async def delete_document(doc_id: int):
             if not row:
                 raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": f"文档 {doc_id} 不存在"})
 
-    # 2. 删除 Milvus 向量
+    # 2. 删除 Qdrant 向量
     from app.main import app as _app
-    milvus: MilvusClient = getattr(_app.state, "milvus_client", None)
+    qdrant: QdrantClient = getattr(_app.state, "milvus_client", None)
     deleted = 0
-    if milvus and milvus.health_check():
-        deleted = await milvus.delete_by_doc_id(doc_id)
+    if qdrant is None or not await qdrant.async_health_check():
+        raise HTTPException(status_code=503, detail={"code": "QDRANT_UNAVAILABLE", "message": "Qdrant 未连接"})
+    deleted = await qdrant.delete_by_doc_id(doc_id)
 
     # 3. 软删除 MySQL 记录
     async with pool.acquire() as conn:

@@ -36,7 +36,7 @@ _embed_logger = get_logger("embedding")
 # 常量
 # ---------------------------------------------------------------------------
 # DashScope Embedding API 单次最大文本数（API 限制）
-MAX_BATCH_SIZE = 25
+MAX_BATCH_SIZE = 10
 # 文本最大 token 数（超过则截断）
 MAX_TEXT_LENGTH = 8000
 # Embedding 向量维度（与 Milvus schema 一致）

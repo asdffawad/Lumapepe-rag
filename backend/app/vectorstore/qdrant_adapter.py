@@ -419,7 +419,7 @@ class QdrantClient:
             client = self._get_client()
             self._ensure_collection_sync()
 
-            from qdrant_client.models import PointStruct, VectorStruct
+            from qdrant_client.models import PointStruct
 
             points = []
             for i, (vector, content) in enumerate(zip(vectors, contents)):
@@ -428,7 +428,7 @@ class QdrantClient:
                 points.append(
                     PointStruct(
                         id=point_id,
-                        vector=VectorStruct(**{"": vector}),
+                        vector=vector,
                         payload={
                             "content": content,
                             "source": source,
@@ -472,18 +472,17 @@ class QdrantClient:
 
         def _do_upsert():
             client = self._get_client()
-            from qdrant_client.models import PointStruct, SparseVector, VectorStruct
+            from qdrant_client.models import PointStruct, SparseVector
 
             converted = []
             for p in points:
                 vec = p.get("vector", [])
                 sparse = p.get("sparse_vector")
                 if sparse:
-                    vs = VectorStruct(
-                        **{"": vec, "sparse": SparseVector(indices=list(sparse.keys()), values=list(sparse.values()))}
-                    )
+                    from qdrant_client.models import SparseVector
+                    vs = {"": vec, "sparse": SparseVector(indices=list(sparse.keys()), values=list(sparse.values()))}
                 else:
-                    vs = VectorStruct(**{"": vec})
+                    vs = vec
                 converted.append(
                     PointStruct(id=p["id"], vector=vs, payload=p.get("payload", {}))
                 )
@@ -502,26 +501,38 @@ class QdrantClient:
 
         def _do_delete():
             client = self._get_client()
-            from qdrant_client.models import Filter, FieldCondition, MatchValue
+            from qdrant_client.models import Filter, FieldCondition, MatchValue, FilterSelector
 
-            client.delete(
+            points = client.scroll(
                 collection_name=self.config.collection_name,
-                points_selector=client.scroll(
+                scroll_filter=Filter(
+                    must=[
+                        FieldCondition(
+                            key="doc_id",
+                            match=MatchValue(value=doc_id),
+                        )
+                    ]
+                ),
+                limit=10000,
+                with_payload=False,
+                with_vectors=False,
+            )[0]
+
+            if points:
+                client.delete(
                     collection_name=self.config.collection_name,
-                    scroll_filter=Filter(
-                        must=[
-                            FieldCondition(
-                                key="doc_id",
-                                match=MatchValue(value=doc_id),
-                            )
-                        ]
+                    points_selector=FilterSelector(
+                        filter=Filter(
+                            must=[
+                                FieldCondition(
+                                    key="doc_id",
+                                    match=MatchValue(value=doc_id),
+                                )
+                            ]
+                        )
                     ),
-                    limit=1000,
-                    with_payload=False,
-                    with_vectors=False,
-                )[0],
-                wait=True,
-            )
+                    wait=True,
+                )
 
             count_info = client.count(
                 collection_name=self.config.collection_name,
@@ -534,11 +545,7 @@ class QdrantClient:
                     ]
                 ),
             )
-            deleted = 0
-            try:
-                deleted = count_info.full if hasattr(count_info, "full") else 0
-            except Exception:
-                pass
+            deleted = len(points)
             return deleted
 
         return await loop.run_in_executor(None, _do_delete)
