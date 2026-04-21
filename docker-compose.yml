@@ -1,65 +1,109 @@
+# ==============================================================================
+# RAG 智能客服 - 生产环境 Docker Compose
+# ==============================================================================
+# 启动命令: docker-compose up -d
+# 查看日志: docker-compose logs -f backend
+# 停止服务: docker-compose down
+# ==============================================================================
+
 services:
-  # ========================================================================
+  # ============================================================================
   # 后端 API 服务
-  # ========================================================================
+  # ============================================================================
   backend:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: rag-backend
+    restart: unless-stopped
     ports:
       - "8000:8000"
     working_dir: /app/backend
+    env_file:
+      - .env
     environment:
-      - PYTHONPATH=/app/backend:/app/scripts
+      # Python
+      - PYTHONPATH=/app/backend
+      - PYTHONUNBUFFERED=1
       # MySQL
       - MYSQL_HOST=mysql
       - MYSQL_PORT=3306
       - MYSQL_USER=root
-      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-rag2026}
+      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - MYSQL_DATABASE=rag_customer_service
-      - MYSQL_POOL_SIZE=10
+      - MYSQL_POOL_SIZE=${MYSQL_POOL_SIZE:-10}
+      - MYSQL_MAX_OVERFLOW=${MYSQL_MAX_OVERFLOW:-20}
       # Redis
-      - REDIS_URL=redis://redis:6379/0
-      - REDIS_DB=0
-      # Milvus（使用 Docker 网络中的容器名）
-      - MILVUS_HOST=milvus
-      - MILVUS_PORT=19530
-      - MILVUS_COLLECTION=knowledge_base
+      - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
+      # Qdrant (优先使用)
+      - QDRANT_ENABLED=${QDRANT_ENABLED:-true}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - QDRANT_GRPC_PORT=6334
+      - QDRANT_COLLECTION=knowledge_base
+      - QDRANT_TIMEOUT=30
+      - QDRANT_PREFER_GRPC=${QDRANT_PREFER_GRPC:-true}
+      - QDRANT_VECTOR_DIM=${QDRANT_VECTOR_DIM:-1024}
+      - QDRANT_DISTANCE=${QDRANT_DISTANCE:-Cosine}
       # Celery
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/2
       # LLM
       - LLM_PROVIDER=${LLM_PROVIDER:-qwen}
       - LLM_MODEL_NAME=${LLM_MODEL_NAME:-qwen-max}
       - LLM_FALLBACK_MODELS=${LLM_FALLBACK_MODELS:-qwen-plus,qwen-turbo}
-      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY:-sk-your-api-key-here}
+      - DASHSCOPE_API_KEY=${DASHSCOPE_API_KEY}
       - LLM_BASE_URL=${LLM_BASE_URL:-https://dashscope.aliyuncs.com/compatible-mode/v1}
-      - LLM_TIMEOUT=60
-      - LLM_MAX_RETRIES=3
-      - LLM_TEMPERATURE=0.7
-      - LLM_MAX_TOKENS=2048
-      # 安全
-      - JWT_SECRET=${JWT_SECRET:-dev-secret-change-in-production}
-      - CORS_ORIGINS=${CORS_ORIGINS:-*}
+      - LLM_TIMEOUT=${LLM_TIMEOUT:-60}
+      - LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-3}
+      - LLM_TEMPERATURE=${LLM_TEMPERATURE:-0.7}
+      - LLM_MAX_TOKENS=${LLM_MAX_TOKENS:-2048}
+      - LLM_MAX_INPUT_TOKENS=${LLM_MAX_INPUT_TOKENS:-4096}
+      - LLM_MAX_OUTPUT_TOKENS=${LLM_MAX_OUTPUT_TOKENS:-2048}
+      # 安全（必须从环境变量读取）
+      - JWT_SECRET=${JWT_SECRET}
+      - ADMIN_API_KEYS=${ADMIN_API_KEYS}
+      - CORS_ORIGINS=${CORS_ORIGINS}
+      - DEBUG=false
       # 限流
       - RATE_LIMIT_ENABLED=${RATE_LIMIT_ENABLED:-true}
       - RATE_LIMIT_GLOBAL=${RATE_LIMIT_GLOBAL:-200}
       - RATE_LIMIT_USER=${RATE_LIMIT_USER:-60}
       - RATE_LIMIT_WINDOW=${RATE_LIMIT_WINDOW:-60}
       # RAG
-      - RAG_TOP_K=10
-      - RAG_RERANK_TOP_K=5
-      - RAG_HYBRID_SEARCH=true
-      - RAG_HNSW_AUTO=true
-      - RAG_RRF_K=60
-      - RAG_BM25_WEIGHT=0.3
-      - RAG_LLM_TIMEOUT_MS=60000
-      # Milvus
-      - MILVUS_ENTITY_COUNT_HINT=1000000
+      - RAG_TOP_K=${RAG_TOP_K:-10}
+      - RAG_RERANK_TOP_K=${RAG_RERANK_TOP_K:-5}
+      - RAG_HYBRID_SEARCH=${RAG_HYBRID_SEARCH:-true}
+      - RAG_HNSW_AUTO=${RAG_HNSW_AUTO:-true}
+      - RAG_RRF_K=${RAG_RRF_K:-60}
+      - RAG_BM25_WEIGHT=${RAG_BM25_WEIGHT:-0.3}
+      - RAG_LLM_TIMEOUT_MS=${RAG_LLM_TIMEOUT_MS:-60000}
+      # WebSocket
+      - WS_MAX_PER_USER=${WS_MAX_PER_USER:-5}
+      - WS_MAX_GLOBAL=${WS_MAX_GLOBAL:-10000}
+      - WS_HEARTBEAT_INTERVAL=${WS_HEARTBEAT_INTERVAL:-30}
+      - WS_HEARTBEAT_TIMEOUT=${WS_HEARTBEAT_TIMEOUT:-60}
+      - WS_PING_TIMEOUT=${WS_PING_TIMEOUT:-5}
+      - WS_MAX_MESSAGE_SIZE=${WS_MAX_MESSAGE_SIZE:-1048576}
       # 监控
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      - DEBUG=${DEBUG:-false}
+      - ENABLE_METRICS=${ENABLE_METRICS:-true}
+    volumes:
+      - ./data:/app/data:ro
+      - ./scripts:/app/scripts:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     deploy:
       resources:
         limits:
@@ -68,49 +112,56 @@ services:
         reservations:
           cpus: "0.5"
           memory: 512M
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      milvus:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 30s
-    volumes:
-      - ./data:/app/data
-      - ./scripts:/app/scripts
-      - ./backend:/app/backend
     networks:
       - rag-network
 
-  # ========================================================================
-  # Celery Worker（异步任务处理器）
-  # ========================================================================
+  # ============================================================================
+  # Celery Worker（异步任务处理器 + 补偿队列）
+  # ============================================================================
   celery_worker:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: rag-celery-worker
+    restart: unless-stopped
     working_dir: /app/backend
-    command: celery -A celery_app worker --loglevel=info --prefetch-multiplier=1
+    command: >
+      celery -A celery_app worker
+      --loglevel=info
+      --prefetch-multiplier=1
+      --max-tasks-per-child=1000
+    env_file:
+      - .env
     environment:
       - PYTHONPATH=/app/backend
+      - PYTHONUNBUFFERED=1
+      # MySQL
       - MYSQL_HOST=mysql
       - MYSQL_PORT=3306
       - MYSQL_USER=root
-      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD:-rag2026}
+      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - MYSQL_DATABASE=rag_customer_service
+      # Redis
       - REDIS_URL=redis://redis:6379/0
-      - MILVUS_HOST=milvus
-      - MILVUS_PORT=19530
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      # Qdrant
+      - QDRANT_ENABLED=${QDRANT_ENABLED:-true}
+      - QDRANT_HOST=qdrant
+      - QDRANT_PORT=6333
+      - QDRANT_GRPC_PORT=6334
+      # Celery
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/2
+      # 日志
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./data:/app/data:ro
+      - ./scripts:/app/scripts:ro
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     deploy:
       resources:
         limits:
@@ -119,55 +170,122 @@ services:
         reservations:
           cpus: "0.25"
           memory: 128M
-    depends_on:
-      mysql:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      milvus:
-        condition: service_healthy
     networks:
       - rag-network
 
-  # ========================================================================
+  # ============================================================================
   # Celery Beat（定时任务调度器）
-  # ========================================================================
+  # ============================================================================
   celery_beat:
     build:
       context: .
       dockerfile: Dockerfile
     container_name: rag-celery-beat
+    restart: unless-stopped
     working_dir: /app/backend
-    command: celery -A celery_app beat --loglevel=info --scheduler=redbeat.RedBeatScheduler
+    command: >
+      celery -A celery_app beat
+      --loglevel=info
+      --scheduler=redbeat.RedBeatScheduler
+    env_file:
+      - .env
     environment:
       - PYTHONPATH=/app/backend
-      - CELERY_BROKER_URL=redis://redis:6379/1
-      - CELERY_RESULT_BACKEND=redis://redis:6379/2
-      - REDBEAT_REDIS_URL=redis://redis:6379/3
+      - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/1
+      - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/2
+      - REDBEAT_REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/3
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      redis:
+        condition: service_healthy
     deploy:
       resources:
         limits:
           cpus: "0.5"
           memory: 256M
-    depends_on:
-      redis:
-        condition: service_healthy
-      backend:
-        condition: service_started
     networks:
       - rag-network
 
-  # ========================================================================
+  # ============================================================================
+  # 补偿队列处理器（处理消息保存失败）
+  # ============================================================================
+  compensation_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rag-compensation-worker
+    restart: unless-stopped
+    working_dir: /app
+    command: python backend/scripts/compensation_worker.py
+    env_file:
+      - .env
+    environment:
+      - PYTHONPATH=/app/backend
+      - PYTHONUNBUFFERED=1
+      # MySQL
+      - MYSQL_HOST=mysql
+      - MYSQL_PORT=3306
+      - MYSQL_USER=root
+      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD}
+      - MYSQL_DATABASE=rag_customer_service
+      # Redis
+      - REDIS_URL=redis://redis:6379/0
+      - REDIS_PASSWORD=${REDIS_PASSWORD}
+      # 日志
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 256M
+    networks:
+      - rag-network
+
+  # ============================================================================
+  # Nginx 反向代理（API + WebSocket）
+  # ============================================================================
+  nginx:
+    image: nginx:alpine
+    container_name: rag-nginx
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./deploy/ssl:/etc/nginx/ssl:ro
+      - ./frontend:/usr/share/nginx/html:ro
+    depends_on:
+      - backend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 128M
+    networks:
+      - rag-network
+
+  # ============================================================================
   # MySQL 数据库
-  # ========================================================================
+  # ============================================================================
   mysql:
     image: mysql:8.0
     container_name: rag-mysql
+    restart: unless-stopped
     ports:
       - "3307:3306"
     environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-rag2026}
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
       - MYSQL_DATABASE=rag_customer_service
       - MYSQL_CHARACTER_SET_SERVER=utf8mb4
       - MYSQL_COLLATION_SERVER=utf8mb4_unicode_ci
@@ -183,7 +301,7 @@ services:
       - mysql_data:/var/lib/mysql
       - ./scripts/init_mysql.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -195,21 +313,27 @@ services:
           memory: 512M
     networks:
       - rag-network
-    restart: unless-stopped
 
-  # ========================================================================
+  # ============================================================================
   # Redis 缓存（兼 Celery Broker）
-  # ========================================================================
+  # ============================================================================
   redis:
     image: redis:7-alpine
     container_name: rag-redis
+    restart: unless-stopped
     ports:
       - "6380:6379"
-    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --save "" --appendonly no
+    command: >
+      redis-server
+      --requirepass ${REDIS_PASSWORD}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
     volumes:
       - redis_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "-a", "${REDIS_PASSWORD}", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -220,73 +344,34 @@ services:
           memory: 512M
     networks:
       - rag-network
-    restart: unless-stopped
 
-  # ========================================================================
-  # Milvus 向量数据库（Standalone 模式）
-  # ========================================================================
-  milvus:
-    image: milvusdb/milvus:v2.4.14
-    container_name: rag-milvus
-    command: ["/milvus/bin/milvus", "run", "standalone"]
+  # ============================================================================
+  # Qdrant 向量数据库（生产推荐）
+  # ============================================================================
+  qdrant:
+    image: qdrant/qdrant:v1.7.0
+    container_name: rag-qdrant
+    restart: unless-stopped
     ports:
-      - "19531:19530"
-      - "9092:9091"
+      - "6333:6333"
+      - "6334:6334"
+    volumes:
+      - qdrant_data:/qdrant/storage
     environment:
-      - ETCD_USE_EMBED=true
-      - ETCD_DATA_DIR=/var/lib/milvus/etcd
-      - MINIO_USE_EMBED=true
-      - MINIO_DATA_DIR=/var/lib/milvus/minio
-      - COMMON_STORAGETYPE=local
-    volumes:
-      - milvus_data:/var/lib/milvus
+      - QDRANT__SERVICE__GRPC_PORT=6334
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
-      interval: 30s
-      timeout: 15s
-      retries: 12
-      start_period: 180s
-    deploy:
-      resources:
-        limits:
-          cpus: "2.0"
-          memory: 6G
-        reservations:
-          cpus: "1.0"
-          memory: 2G
-    networks:
-      - rag-network
-    restart: unless-stopped
-
-  # ========================================================================
-  # 前端（静态文件 + API 反向代理）
-  # ========================================================================
-  frontend:
-    image: nginx:alpine
-    container_name: rag-frontend
-    ports:
-      - "80:80"
-    volumes:
-      - ./frontend/index.html:/usr/share/nginx/html/index.html:ro
-      - ./frontend/admin.html:/usr/share/nginx/html/admin.html:ro
-      - ./frontend/test.html:/usr/share/nginx/html/test.html:ro
-      - ./frontend/nginx.conf:/etc/nginx/conf.d/default.conf:ro
-    depends_on:
-      - backend
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost/"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
+      test: ["CMD-SHELL", "pidof qdrant || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
       start_period: 10s
     deploy:
       resources:
         limits:
-          cpus: "0.5"
-          memory: 128M
+          cpus: "1.0"
+          memory: 1G
     networks:
       - rag-network
-    restart: unless-stopped
 
 networks:
   rag-network:
@@ -295,4 +380,4 @@ networks:
 volumes:
   mysql_data:
   redis_data:
-  milvus_data:
+  qdrant_data:

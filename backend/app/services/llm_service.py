@@ -526,79 +526,99 @@ class QwenProvider(LLMBase, _BaseHTTPClientMixin):
         error_detail: str | None = None
         status = "error"
 
-        client = self._build_client(self.timeout)
-        try:
-            async with client.stream(
-                "POST",
-                f"{self.base_url}/chat/completions",
-                headers=headers,
-                json=payload,
-            ) as response:
-                # 流式响应: 先检查状态码再读 body
-                if response.status_code == 429:
-                    error_detail = "Rate limited (429)"
-                    _llm_logger.warning("LLM stream rate limited", extra={"request_id": request_id or ""})
-                    yield "[错误] 请求过于频繁，请稍后再试。"
-                    return
-                if response.status_code >= 400:
-                    body_text = ""
-                    try:
-                        body_text = await response.aread()
-                        error_detail = f"HTTP {response.status_code}: {body_text[:200]}"
-                    except Exception:
-                        error_detail = f"HTTP {response.status_code}"
-                    _llm_logger.error("LLM stream HTTP error", extra={
-                        "request_id": request_id or "",
-                        "status_code": response.status_code,
-                    })
-                    yield f"[错误] 服务异常 ({response.status_code})，请稍后再试。"
-                    return
-
-                async for line in response.aiter_lines():
-                    if not line or not line.startswith("data: "):
-                        continue
-                    data_str = line[6:]
-                    if data_str == "[DONE]":
-                        break
-                    try:
-                        import json as _json
-                        chunk = _json.loads(data_str)
-                        delta = chunk["choices"][0].get("delta", {})
-                        content = delta.get("content", "")
-                        if content:
-                            total_output_chars += len(content)
-                            yield content
-                    except (_json.JSONDecodeError, KeyError, IndexError):
-                        continue
-
-            status = "success"
-            latency_ms = int((time.monotonic() - start) * 1000)
-            # 流式输出的 token 数无法精确获取，用字符数估算 (中英文平均 ~2 chars/token)
-            est_output_tokens = total_output_chars // 2
-            self._log_llm_call(
-                request_id=request_id,
-                model=self.model_name,
-                provider=self.provider_name,
-                input_tokens=input_tokens,
-                output_tokens=est_output_tokens,
-                latency_ms=latency_ms,
-                finish_reason="stop",
-                status="success",
-            )
-
-        except httpx.RequestError as e:
-            error_detail = f"Stream network error: {str(e)[:200]}"
-            _llm_logger.error("LLM stream network error", extra={
-                "request_id": request_id or "",
-                "error": error_detail,
-            })
-            yield f"[错误] 网络异常，请稍后再试。"
-        finally:
+        for attempt in range(self.max_retries):
+            client = self._build_client(self.timeout)
+            client_close_needed = True
             try:
-                await client.aclose()
-            except Exception:
-                pass  # 忽略关闭时的小异常，避免掩盖真正的错误
-            if status == "error":
+                async with client.stream(
+                    "POST",
+                    f"{self.base_url}/chat/completions",
+                    headers=headers,
+                    json=payload,
+                ) as response:
+                    client_close_needed = False
+                    if response.status_code == 429:
+                        wait = 2 ** attempt
+                        _llm_logger.warning(
+                            "LLM stream rate limited, backing off",
+                            extra={"request_id": request_id or "", "attempt": attempt + 1, "wait_s": wait}
+                        )
+                        await asyncio.sleep(wait)
+                        continue
+
+                    if response.status_code >= 400:
+                        body_text = ""
+                        try:
+                            body_text = await response.aread()
+                            error_detail = f"HTTP {response.status_code}: {body_text[:200]}"
+                        except Exception:
+                            error_detail = f"HTTP {response.status_code}"
+
+                        err_class = self._classify_error(response.status_code)
+                        if err_class in ("rate_limit", "server_error"):
+                            if attempt < self.max_retries - 1:
+                                wait = 2 ** attempt
+                                _llm_logger.warning(
+                                    "LLM stream HTTP error, retrying",
+                                    extra={"request_id": request_id or "", "attempt": attempt + 1, "status": response.status_code}
+                                )
+                                await asyncio.sleep(wait)
+                                continue
+
+                        _llm_logger.error("LLM stream HTTP error (non-retryable)", extra={
+                            "request_id": request_id or "",
+                            "status_code": response.status_code,
+                        })
+                        yield f"[错误] 服务异常 ({response.status_code})，请稍后重试。"
+                        return
+
+                    async for line in response.aiter_lines():
+                        if not line or not line.startswith("data: "):
+                            continue
+                        data_str = line[6:]
+                        if data_str == "[DONE]":
+                            break
+                        try:
+                            import json as _json
+                            chunk = _json.loads(data_str)
+                            delta = chunk["choices"][0].get("delta", {})
+                            content = delta.get("content", "")
+                            if content:
+                                total_output_chars += len(content)
+                                yield content
+                        except (_json.JSONDecodeError, KeyError, IndexError):
+                            continue
+
+                    status = "success"
+                    latency_ms = int((time.monotonic() - start) * 1000)
+                    est_output_tokens = total_output_chars // 2
+                    self._log_llm_call(
+                        request_id=request_id,
+                        model=self.model_name,
+                        provider=self.provider_name,
+                        input_tokens=input_tokens,
+                        output_tokens=est_output_tokens,
+                        latency_ms=latency_ms,
+                        finish_reason="stop",
+                        status="success",
+                    )
+                    return
+
+            except httpx.RequestError as e:
+                if attempt < self.max_retries - 1:
+                    error_detail = f"Stream network error: {str(e)[:200]}"
+                    _llm_logger.warning(
+                        "LLM stream network error, retrying",
+                        extra={"request_id": request_id or "", "attempt": attempt + 1, "error": error_detail}
+                    )
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                error_detail = f"Stream network error: {str(e)[:200]}"
+                _llm_logger.error("LLM stream network error (exhausted retries)", extra={
+                    "request_id": request_id or "",
+                    "error": error_detail,
+                })
+                yield "[错误] 网络异常，请稍后重试。"
                 self._log_llm_call(
                     request_id=request_id,
                     model=self.model_name,
@@ -610,6 +630,57 @@ class QwenProvider(LLMBase, _BaseHTTPClientMixin):
                     status="error",
                     error_detail=error_detail,
                 )
+                return
+            except Exception as e:
+                if attempt < self.max_retries - 1:
+                    error_detail = f"Stream error: {str(e)[:200]}"
+                    _llm_logger.warning(
+                        "LLM stream error, retrying",
+                        extra={"request_id": request_id or "", "attempt": attempt + 1, "error": error_detail}
+                    )
+                    await asyncio.sleep(2 ** attempt)
+                    continue
+                error_detail = f"Stream error: {str(e)[:200]}"
+                _llm_logger.error("LLM stream error (exhausted retries)", extra={
+                    "request_id": request_id or "",
+                    "error": error_detail,
+                })
+                yield "[错误] 服务异常，请稍后重试。"
+                self._log_llm_call(
+                    request_id=request_id,
+                    model=self.model_name,
+                    provider=self.provider_name,
+                    input_tokens=input_tokens,
+                    output_tokens=0,
+                    latency_ms=int((time.monotonic() - start) * 1000),
+                    finish_reason="error",
+                    status="error",
+                    error_detail=error_detail,
+                )
+                return
+            finally:
+                if client_close_needed:
+                    try:
+                        await client.aclose()
+                    except Exception:
+                        pass
+
+        _llm_logger.error("LLM stream exhausted all retries", extra={
+            "request_id": request_id or "",
+        })
+        yield "[错误] 服务暂时不可用，请稍后重试。"
+        self._log_llm_call(
+            request_id=request_id,
+            model=self.model_name,
+            provider=self.provider_name,
+            input_tokens=input_tokens,
+            output_tokens=0,
+            latency_ms=int((time.monotonic() - start) * 1000),
+            finish_reason="error",
+            status="error",
+            error_detail="All retries exhausted",
+        )
+
 
     def count_tokens(self, text: str) -> int:
         return self._counter.count(text)

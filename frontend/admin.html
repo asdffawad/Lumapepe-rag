@@ -454,9 +454,207 @@ body {
   margin-top: 16px;
 }
 
-/* Responsive */
+/* 响应式 */
 @media (max-width: 900px) {
   .doc-row-header { grid-template-columns: 1fr; }
+}
+
+/* ── 调试面板 ─────────────────────────────────────────── */
+.debug-toggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 12px;
+  background: rgba(255,255,255,0.1);
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  color: rgba(255,255,255,0.7);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.debug-toggle:hover {
+  background: rgba(255,255,255,0.15);
+  color: white;
+}
+.debug-toggle.active {
+  background: var(--violet);
+  color: white;
+  border-color: var(--violet);
+}
+.debug-toggle .badge {
+  background: var(--rose);
+  color: white;
+  padding: 1px 6px;
+  border-radius: 10px;
+  font-size: 10px;
+  min-width: 18px;
+  text-align: center;
+}
+
+.debug-panel {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: var(--ink);
+  max-height: 0;
+  overflow: hidden;
+  transition: max-height 0.3s ease;
+  z-index: 1000;
+  box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+}
+.debug-panel.open {
+  max-height: 50vh;
+}
+.debug-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 20px;
+  background: var(--ink-2);
+  border-bottom: 1px solid var(--ink-3);
+}
+.debug-header h3 {
+  font-size: 14px;
+  font-weight: 600;
+  color: white;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.debug-actions {
+  display: flex;
+  gap: 8px;
+}
+.debug-btn {
+  padding: 6px 12px;
+  background: var(--ink-3);
+  border: none;
+  border-radius: 6px;
+  color: white;
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+.debug-btn:hover {
+  background: var(--violet);
+}
+.debug-content {
+  display: flex;
+  height: calc(50vh - 56px);
+}
+.debug-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 12px;
+}
+.debug-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 12px;
+  background: var(--ink-2);
+  border-radius: 8px;
+  margin-bottom: 8px;
+  cursor: pointer;
+  transition: all 0.2s;
+  font-size: 12px;
+  color: white;
+}
+.debug-item:hover {
+  background: var(--ink-3);
+}
+.debug-item .method {
+  font-weight: 600;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 10px;
+}
+.debug-item .method.GET { background: var(--emerald); }
+.debug-item .method.POST { background: var(--violet); }
+.debug-item .method.DELETE { background: var(--rose); }
+.debug-item .method.ERROR { background: var(--rose); }
+.debug-item .url {
+  flex: 1;
+  color: rgba(255,255,255,0.7);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.debug-item .status {
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 4px;
+  font-size: 11px;
+}
+.debug-item .status.success { background: rgba(5,150,105,0.3); color: #6ee7b7; }
+.debug-item .status.error { background: rgba(225,29,72,0.3); color: #fca5a5; }
+.debug-item .status.pending { background: rgba(217,119,6,0.3); color: #fde68a; }
+.debug-item .duration {
+  color: rgba(255,255,255,0.5);
+  font-size: 11px;
+}
+.debug-detail {
+  width: 400px;
+  border-left: 1px solid var(--ink-3);
+  background: var(--ink);
+  overflow-y: auto;
+  padding: 12px;
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: rgba(255,255,255,0.8);
+}
+.debug-detail h4 {
+  color: white;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.debug-detail pre {
+  background: var(--ink-2);
+  padding: 10px;
+  border-radius: 6px;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-all;
+  color: rgba(255,255,255,0.7);
+  max-height: 150px;
+  overflow-y: auto;
+  margin-bottom: 12px;
+}
+
+/* ── 加载骨架屏 ───────────────────────────────────────── */
+.skeleton {
+  background: linear-gradient(90deg, var(--paper-2) 25%, var(--paper) 50%, var(--paper-2) 75%);
+  background-size: 200% 100%;
+  animation: shimmer 1.5s infinite;
+  border-radius: 4px;
+}
+@keyframes shimmer {
+  0% { background-position: 200% 0; }
+  100% { background-position: -200% 0; }
+}
+.skeleton-block {
+  height: 20px;
+  margin-bottom: 8px;
+}
+.skeleton-text {
+  height: 14px;
+  width: 60%;
+}
+
+/* ── 空状态 ───────────────────────────────────────────── */
+.empty-state {
+  text-align: center;
+  padding: 40px 20px;
+  color: var(--ink-4);
+  font-size: 13px;
+}
+.empty-state svg {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 12px;
+  opacity: 0.5;
 }
 </style>
 </head>
@@ -466,6 +664,14 @@ body {
 <nav class="topnav">
   <h1>RAG 管理后台</h1>
   <div style="display:flex;gap:12px;align-items:center">
+    <button class="debug-toggle" id="debugToggle" onclick="toggleDebugPanel()">
+      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
+      </svg>
+      网络日志
+      <span class="badge" id="debugBadge" style="display:none">0</span>
+    </button>
+    <span style="color:rgba(255,255,255,0.3)">|</span>
     <a href="/">返回聊天</a>
     <span style="color:rgba(255,255,255,0.3)">|</span>
     <a href="/metrics" target="_blank">Prometheus</a>
@@ -843,7 +1049,248 @@ body {
 <!-- Toast -->
 <div id="toast"></div>
 
+<!-- 调试面板 -->
+<div class="debug-panel" id="debugPanel">
+  <div class="debug-header">
+    <h3>
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
+      </svg>
+      网络请求日志
+    </h3>
+    <div class="debug-actions">
+      <button class="debug-btn" onclick="clearDebugLog()">清空</button>
+      <button class="debug-btn" onclick="toggleDebugPanel()">收起</button>
+    </div>
+  </div>
+  <div class="debug-content">
+    <div class="debug-list" id="debugList">
+      <div class="empty-state" style="color:rgba(255,255,255,0.5)">暂无请求记录</div>
+    </div>
+    <div class="debug-detail" id="debugDetail">
+      <h4>请求详情</h4>
+      <p style="color:rgba(255,255,255,0.5)">点击左侧请求查看详情</p>
+    </div>
+  </div>
+</div>
+
 <script>
+/**
+ * ============================================================================
+ * RAG 管理后台 - 前端脚本
+ * ============================================================================
+ *
+ * API_CONFIG: 所有后端接口配置
+ * ------------------------------------------------------------
+ *
+ * 监控相关:
+ *   GET  /api/v1/health/detailed  - 组件健康状态
+ *   GET  /api/v1/health/alerts    - 告警信息
+ *
+ * 文档管理:
+ *   GET  /api/v1/admin/documents       - 文档列表
+ *   POST /api/v1/admin/documents       - 创建文档
+ *   POST /api/v1/admin/documents/{id}/reindex - 重建索引
+ *   POST /api/v1/admin/documents/{id}  - 删除文档
+ *
+ * 增量摄取:
+ *   POST /api/v1/admin/ingest/incremental - 执行增量摄取
+ *
+ * 检索调试:
+ *   POST /api/v1/debug/retrieve        - 检索调试
+ *
+ * 认证:
+ *   POST /api/v1/debug/auth/token      - 获取认证Token
+ *
+ * 测试:
+ *   POST /api/v1/chat                  - 聊天接口
+ *
+ * ============================================================================
+ */
+
+'use strict';
+
+// ==================== API 配置 ====================
+const API_CONFIG = {
+    BASE_URL: '',
+    TIMEOUT: 30000,
+    RETRY_ENABLED: true,
+    RETRY_CONFIG: {
+        maxRetries: 1,
+        retryDelay: 1000,
+        retryOn: [0, 408, 500, 502, 503, 504]
+    },
+    ENDPOINTS: {
+        HEALTH_DETAILED: '/api/v1/health/detailed',
+        HEALTH_ALERTS: '/api/v1/health/alerts',
+        DOCUMENTS: '/api/v1/admin/documents',
+        DOCUMENT_REINDEX: (id) => `/api/v1/admin/documents/${id}/reindex`,
+        INGEST_INCREMENTAL: '/api/v1/admin/ingest/incremental',
+        RETRIEVE_DEBUG: '/api/v1/debug/retrieve',
+        AUTH_TOKEN: '/api/v1/debug/auth/token',
+        CHAT: '/api/v1/chat'
+    }
+};
+
+// ==================== 网络请求日志系统 ====================
+const RequestLogger = {
+    logs: [],
+    maxLogs: 20,
+    selectedId: null,
+
+    add(entry) {
+        entry.timestamp = Date.now();
+        this.logs.unshift(entry);
+        if (this.logs.length > this.maxLogs) this.logs.pop();
+        this.render();
+        this.updateBadge();
+    },
+
+    update(id, updates) {
+        const log = this.logs.find(l => l.id === id);
+        if (log) { Object.assign(log, updates); this.render(); }
+    },
+
+    clear() {
+        this.logs = [];
+        this.selectedId = null;
+        this.render();
+        this.updateBadge();
+    },
+
+    render() {
+        const container = document.getElementById('debugList');
+        if (!container) return;
+        if (!this.logs.length) {
+            container.innerHTML = '<div class="empty-state" style="color:rgba(255,255,255,0.5)">暂无请求记录</div>';
+            return;
+        }
+        container.innerHTML = this.logs.map(log => {
+            const methodClass = log.method?.toUpperCase() || 'GET';
+            const statusClass = log.status >= 200 && log.status < 300 ? 'success' :
+                               log.status === 0 || log.status >= 400 ? 'error' : 'pending';
+            return `
+                <div class="debug-item ${this.selectedId === log.id ? 'selected' : ''}"
+                     onclick="RequestLogger.select('${log.id}')"
+                     style="${this.selectedId === log.id ? 'border:1px solid var(--violet)' : ''}">
+                    <span class="method ${methodClass}">${log.method || 'GET'}</span>
+                    <span class="url">${this.truncateUrl(log.url)}</span>
+                    <span class="status ${statusClass}">${log.status || '...'}</span>
+                    <span class="duration">${log.duration ? log.duration + 'ms' : ''}</span>
+                </div>`;
+        }).join('');
+    },
+
+    select(id) {
+        this.selectedId = id;
+        this.render();
+        this.renderDetail();
+    },
+
+    renderDetail() {
+        const container = document.getElementById('debugDetail');
+        if (!container) return;
+        const log = this.logs.find(l => l.id === this.selectedId);
+        if (!log) {
+            container.innerHTML = '<h4>请求详情</h4><p style="color:rgba(255,255,255,0.5)">点击左侧请求查看详情</p>';
+            return;
+        }
+        container.innerHTML = `
+            <h4>请求详情</h4>
+            <div><strong>URL:</strong><pre>${log.url}</pre></div>
+            ${log.method ? `<div><strong>Method:</strong><pre>${log.method}</pre></div>` : ''}
+            ${log.request?.body ? `<div><strong>Request Body:</strong><pre>${JSON.stringify(log.request.body, null, 2)}</pre></div>` : ''}
+            ${log.response ? `<div><strong>Status:</strong><pre>${log.status}</pre></div>
+                              <div><strong>Response:</strong><pre>${this.formatResponse(log.response.body)}</pre></div>` : ''}
+            ${log.error ? `<div><strong>Error:</strong><pre>${log.error}</pre></div>` : ''}
+            <div><strong>Duration:</strong><pre>${log.duration ? log.duration + ' ms' : 'N/A'}</pre></div>`;
+    },
+
+    formatResponse(body) {
+        if (!body) return 'N/A';
+        const str = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
+        return str.length > 2000 ? str.slice(0, 2000) + '\n\n... (truncated)' : str;
+    },
+
+    truncateUrl(url) {
+        if (!url) return '';
+        return url.length > 60 ? url.slice(0, 30) + '...' + url.slice(-25) : url;
+    },
+
+    updateBadge() {
+        const badge = document.getElementById('debugBadge');
+        if (badge) badge.textContent = this.logs.length;
+        badge.style.display = this.logs.length > 0 ? 'inline' : 'none';
+    }
+};
+
+// ==================== 增强的 API 函数 ====================
+async function apiFetch(url, options = {}) {
+    const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+    const startTime = Date.now();
+    const fullUrl = url.startsWith('http') ? url : API_CONFIG.BASE_URL + url;
+    const method = options.method || 'GET';
+
+    RequestLogger.add({
+        id: requestId, method, url: fullUrl, status: 0, type: 'http',
+        request: { headers: options.headers || {}, body: options.body ? JSON.parse(options.body) : null }
+    });
+
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.TIMEOUT);
+
+    try {
+        const response = await fetch(fullUrl, { ...options, signal: controller.signal });
+        clearTimeout(timeoutId);
+        const duration = Date.now() - startTime;
+        let body;
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+            body = await response.json();
+        } else {
+            body = await response.text();
+        }
+
+        RequestLogger.update(requestId, { status: response.status, duration, response: { headers: Object.fromEntries(response.headers.entries()), body } });
+        console.debug(`[API] ${method} ${url}`, { status: response.status, duration: duration + 'ms', data: body });
+        return { ok: response.ok, status: response.status, data: body };
+
+    } catch (error) {
+        clearTimeout(timeoutId);
+        const duration = Date.now() - startTime;
+        if (API_CONFIG.RETRY_ENABLED && API_CONFIG.RETRY_CONFIG.retryOn.includes(0) && API_CONFIG.RETRY_CONFIG.maxRetries > 0) {
+            console.debug(`[API] Retrying ${url}...`);
+            await new Promise(r => setTimeout(r, API_CONFIG.RETRY_CONFIG.retryDelay));
+            return apiFetch(url, options);
+        }
+        RequestLogger.update(requestId, { status: 0, duration, error: error.message });
+        console.debug(`[API Error] ${method} ${url}`, { error: error.message });
+        return { ok: false, status: 0, error: error.message };
+    }
+}
+
+// 简化的 GET/POST 包装函数（保持向后兼容）
+async function apiGet(url) {
+    return apiFetch(url, { method: 'GET' });
+}
+
+async function apiPost(url, body) {
+    return apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
+}
+
+// ==================== 调试面板控制 ====================
+function toggleDebugPanel() {
+    const panel = document.getElementById('debugPanel');
+    const toggle = document.getElementById('debugToggle');
+    panel.classList.toggle('open');
+    toggle.classList.toggle('active');
+}
+
+function clearDebugLog() {
+    RequestLogger.clear();
+    document.getElementById('debugDetail').innerHTML = '<h4>请求详情</h4><p style="color:rgba(255,255,255,0.5)">点击左侧请求查看详情</p>';
+}
+
 // ── Helpers ────────────────────────────────────────────────────────
 let toastTimer = null;
 function showToast(msg, type = 'info') {
@@ -883,17 +1330,38 @@ function escHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
-// ── Tab nav ──────────────────────────────────────────────────────
+// ── Tab nav (with scroll position preservation) ──────────────────
+const TabScrollPositions = {};
+
 function switchTab(name) {
-  document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
-  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
-  document.querySelector(`.tab-btn[onclick="switchTab('${name}')"]`).classList.add('active');
-  document.getElementById('panel-' + name).classList.add('active');
-  if (name === 'monitor') loadMonitor();
-  else if (name === 'testing') { /* no init */ }
-  else if (name === 'knowledge') loadDocs();
-  else if (name === 'ingest') { loadIngestDetails(); loadBeatSchedule(); }
-  else if (name === 'retrieve') { /* auto-init, no action needed */ }
+    // 保存当前 Tab 的滚动位置
+    const currentTab = document.querySelector('.panel.active');
+    if (currentTab) {
+        TabScrollPositions[currentTab.id] = currentTab.querySelector('.content')?.scrollTop || 0;
+    }
+
+    // 切换 Tab
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelector(`.tab-btn[onclick="switchTab('${name}')"]`).classList.add('active');
+    const targetPanel = document.getElementById('panel-' + name);
+    if (targetPanel) {
+        targetPanel.classList.add('active');
+
+        // 恢复该 Tab 的滚动位置
+        const savedScrollTop = TabScrollPositions[targetPanel.id];
+        if (savedScrollTop) {
+            const content = targetPanel.querySelector('.content');
+            if (content) content.scrollTop = savedScrollTop;
+        }
+    }
+
+    // 懒加载各 Tab 数据
+    if (name === 'monitor') loadMonitor();
+    else if (name === 'testing') { /* no init */ }
+    else if (name === 'knowledge') loadDocs();
+    else if (name === 'ingest') { loadIngestDetails(); loadBeatSchedule(); }
+    else if (name === 'retrieve') { /* auto-init */ }
 }
 
 // ── Monitor ────────────────────────────────────────────────────────
@@ -911,7 +1379,7 @@ async function loadMonitor() {
   document.getElementById('mon-llm-fail').textContent = alerts.llm?.consecutive_failures ?? 0;
   document.getElementById('mon-latency').textContent = alerts.latency?.p99_ms ? Math.round(alerts.latency.p99_ms) : '-';
 
-  const compNames = ['mysql','redis','milvus','llm'];
+  const compNames = ['mysql','redis','qdrant','llm'];
   document.getElementById('comp-list').innerHTML = compNames.map(k => {
     const c = comps[k] || {};
     const dot = c.status === 'up' ? 'var(--emerald)' : c.status === 'down' ? 'var(--rose)' : 'var(--amber)';

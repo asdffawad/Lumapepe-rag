@@ -1,6 +1,12 @@
 """
 pytest 配置文件
 """
+import os
+
+# 设置测试环境变量（在导入任何应用模块之前）
+os.environ["JWT_SECRET"] = "test-secret-key-for-testing-only-32chars"
+os.environ["DEBUG"] = "true"
+
 import pytest
 import pytest_asyncio
 from httpx import AsyncClient, ASGITransport

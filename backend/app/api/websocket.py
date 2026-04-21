@@ -387,7 +387,7 @@ async def handle_message(
                     })
                     accumulated += chunk_obj
         
-        # 流结束后，保存消息
+        # 先保存用户消息
         try:
             await session_svc.add_message(
                 session_id=ctx.session_id,
@@ -395,6 +395,13 @@ async def handle_message(
                 content=content,
                 intent=intent,
             )
+        except Exception as e:
+            _logger.error(f"Failed to save user message: {e}", extra={"session_id": session_id})
+            # 用户消息保存失败仍可继续，AI回答仍然有效
+
+        # 保存 AI 回复（带补偿机制）
+        save_success = True
+        try:
             await session_svc.add_message(
                 session_id=ctx.session_id,
                 role="assistant",
@@ -402,23 +409,36 @@ async def handle_message(
                 intent=intent,
                 sources={"sources": list(set(final_citations))} if final_citations else None,
             )
+        except Exception as e:
+            _logger.error(f"Failed to save assistant message: {e}", extra={
+                "session_id": session_id,
+                "content_length": len(accumulated),
+                "user_id": user_id,
+            })
+            save_success = False
+            # 记录补偿任务（可由后台 worker 恢复）
+            await _queue_compensation(
+                session_id=ctx.session_id,
+                role="assistant",
+                content=accumulated,
+                intent=intent,
+                citations=list(set(final_citations)),
+            )
+        
+        # 更新会话
+        try:
             await session_svc.update_session(ctx.session_id, intent=intent)
         except Exception as e:
-            _logger.error(f"Failed to save message: {e}", extra={"session_id": session_id})
-            await websocket.send_json({
-                "type": "error",
-                "code": "SAVE_ERROR",
-                "message": "保存消息失败"
-            })
-            return  # 提前返回，不再发送 done 消息
-
-        # 发送完成消息
+            _logger.error(f"Failed to update session: {e}", extra={"session_id": session_id})
+        
+        # 发送完成消息（即使保存失败，AI回答也已发送给用户）
         await websocket.send_json({
             "type": "done",
             "session_id": ctx.session_id,
             "intent": intent,
             "sources": list(set(final_citations)),
             "content_length": len(accumulated),
+            "save_status": "success" if save_success else "partial",
         })
     
     except PermissionError as e:
@@ -434,6 +454,43 @@ async def handle_message(
             "type": "error",
             "code": "MESSAGE_ERROR",
             "message": str(e)
+        })
+
+
+async def _queue_compensation(
+    session_id: str,
+    role: str,
+    content: str,
+    intent: str | None,
+    citations: list[str],
+) -> None:
+    """
+    将保存失败的消息加入补偿队列。
+
+    后续由后台 worker 从 Redis 队列中取出并重试保存。
+    """
+    try:
+        redis_client = get_redis_client()
+        import json
+        compensation = {
+            "session_id": session_id,
+            "role": role,
+            "content": content,
+            "intent": intent,
+            "citations": citations,
+            "created_at": __import__("time").time(),
+        }
+        key = "compensation:messages"
+        await redis_client.rpush(key, json.dumps(compensation))
+        _logger.info("Message queued for compensation", extra={
+            "session_id": session_id,
+            "role": role,
+            "content_length": len(content),
+        })
+    except Exception as e:
+        _logger.error(f"Failed to queue compensation: {e}", extra={
+            "session_id": session_id,
+            "role": role,
         })
 
 

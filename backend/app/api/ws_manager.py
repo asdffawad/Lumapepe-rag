@@ -1,11 +1,16 @@
 """
 WebSocket 连接管理器（企业级）
 负责管理活跃连接、会话隔离、心跳保活、连接数限制、消息限流
+
+分布式部署支持：
+- 本地内存存储 WebSocket 对象（必须本地）
+- Redis 存储连接数计数（全局/单用户），实现跨进程共享
 """
 from __future__ import annotations
 
 import asyncio
 import time
+import json
 from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Dict, Set, Optional
@@ -15,6 +20,12 @@ from app.logging_config import get_logger
 from app.middleware.auth import AuthUser
 
 _logger = get_logger("ws.manager")
+
+# Redis key 前缀
+_WS_CONN_PREFIX = "ws:conn:"
+_WS_GLOBAL_COUNT = "ws:global_count"
+_WS_USER_COUNT_PREFIX = "ws:user_count:"
+_WS_CONN_TTL = 3600  # 连接信息 TTL（秒）
 
 
 @dataclass
@@ -107,6 +118,10 @@ class ConnectionManager:
     _instance: Optional[ConnectionManager] = None
 
     def __new__(cls, config=None):
+        # 检查模块级单例（用于测试重置）
+        if _manager is not None:
+            # 如果已初始化过，直接返回（避免重复初始化）
+            return _manager
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._instance._initialized = False
@@ -129,7 +144,7 @@ class ConnectionManager:
         self._rate_limit_window = cfg.rate_limit_window
         self._max_message_size = cfg.max_message_size
 
-        # 连接存储
+        # 连接存储（本地内存）
         # session_id -> ConnectionInfo
         self._connections: Dict[str, ConnectionInfo] = {}
         # user_id -> set[session_id]
@@ -137,8 +152,13 @@ class ConnectionManager:
         # session_id -> user_id (反向映射)
         self._session_users: Dict[str, str] = {}
 
-        # 全局连接计数
+        # 全局连接计数（本地内存，用于快速访问）
         self._global_count: int = 0
+
+        # Redis 客户端（分布式计数）
+        self._redis_client = None
+        self._redis_connected = False
+        self._init_redis()
 
         # 限流器
         self._user_limiter: Optional[SlidingWindowLimiter] = None
@@ -149,6 +169,98 @@ class ConnectionManager:
 
         # 锁
         self._lock = asyncio.Lock()
+
+    def _init_redis(self):
+        """初始化 Redis 连接（用于分布式计数）"""
+        try:
+            from app.cache.redis_client import get_redis_client
+            self._redis_client = get_redis_client()
+            self._redis_connected = True
+            _logger.info("Redis connection initialized for distributed WS management")
+        except Exception as e:
+            _logger.warning(f"Redis not available, distributed WS counting disabled: {e}")
+            self._redis_connected = False
+
+    def _get_redis(self):
+        """获取 Redis 客户端（同步）"""
+        if self._redis_client is None:
+            self._init_redis()
+        return self._redis_client
+
+    async def _sync_global_count_from_redis(self) -> int:
+        """从 Redis 同步全局连接计数"""
+        if not self._redis_connected:
+            return self._global_count
+        try:
+            r = self._redis_client.client()
+            count = r.get(_WS_GLOBAL_COUNT)
+            return int(count) if count else 0
+        except Exception as e:
+            _logger.warning(f"Failed to sync global count from Redis: {e}")
+            return self._global_count
+
+    async def _increment_global_count(self) -> int:
+        """原子递增全局计数"""
+        if not self._redis_connected:
+            self._global_count += 1
+            return self._global_count
+        try:
+            r = self._redis_client.client()
+            return r.incr(_WS_GLOBAL_COUNT)
+        except Exception as e:
+            _logger.warning(f"Failed to increment global count: {e}")
+            self._global_count += 1
+            return self._global_count
+
+    async def _decrement_global_count(self) -> int:
+        """原子递减全局计数"""
+        if not self._redis_connected:
+            self._global_count = max(0, self._global_count - 1)
+            return self._global_count
+        try:
+            r = self._redis_client.client()
+            return r.decr(_WS_GLOBAL_COUNT)
+        except Exception as e:
+            _logger.warning(f"Failed to decrement global count: {e}")
+            self._global_count = max(0, self._global_count - 1)
+            return self._global_count
+
+    async def _get_user_count(self, user_id: str) -> int:
+        """获取用户的连接计数"""
+        if not self._redis_connected:
+            return len(self._user_sessions.get(user_id, set()))
+        try:
+            r = self._redis_client.client()
+            count = r.get(f"{_WS_USER_COUNT_PREFIX}{user_id}")
+            return int(count) if count else 0
+        except Exception as e:
+            _logger.warning(f"Failed to get user count: {e}")
+            return len(self._user_sessions.get(user_id, set()))
+
+    async def _increment_user_count(self, user_id: str) -> int:
+        """原子递增用户计数"""
+        if not self._redis_connected:
+            # 内存模式：直接使用本地计数
+            return len(self._user_sessions.get(user_id, set()))
+        try:
+            r = self._redis_client.client()
+            return r.incr(f"{_WS_USER_COUNT_PREFIX}{user_id}")
+        except Exception as e:
+            _logger.warning(f"Failed to increment user count: {e}")
+            return len(self._user_sessions.get(user_id, set()))
+
+    async def _decrement_user_count(self, user_id: str) -> int:
+        """原子递减用户计数"""
+        if not self._redis_connected:
+            self._user_sessions[user_id].discard("")
+            return len(self._user_sessions.get(user_id, set()))
+        try:
+            r = self._redis_client.client()
+            count = r.decr(f"{_WS_USER_COUNT_PREFIX}{user_id}")
+            return max(0, count)
+        except Exception as e:
+            _logger.warning(f"Failed to decrement user count: {e}")
+            return max(0, len(self._user_sessions.get(user_id, set())))
 
     def _get_limiter(self) -> tuple[SlidingWindowLimiter, SlidingWindowLimiter]:
         """获取限流器（延迟初始化）"""
@@ -173,18 +285,21 @@ class ConnectionManager:
 
     async def check_connection_limits(self, user_id: str) -> tuple[bool, str, int]:
         """
-        检查连接数限制
+        检查连接数限制（分布式支持）
 
         Returns:
             (是否允许, 错误码, 错误消息)
         """
         async with self._lock:
+            # 同步全局计数
+            self._global_count = await self._sync_global_count_from_redis()
+
             # 检查全局限制
             if self._global_count >= self._max_global:
                 return False, "SERVER_FULL", "服务器连接数已满，请稍后重试"
 
             # 检查单用户限制
-            user_conn_count = len(self._user_sessions.get(user_id, set()))
+            user_conn_count = await self._get_user_count(user_id)
             if user_conn_count >= self._max_per_user:
                 return False, "TOO_MANY_CONNECTIONS", f"用户连接数超限（最大 {self._max_per_user} 个），请关闭其他连接后重试"
 
@@ -211,33 +326,34 @@ class ConnectionManager:
 
     async def connect(self, websocket: WebSocket, session_id: str, user_id: str) -> tuple[bool, str, str]:
         """
-        建立 WebSocket 连接
+        建立 WebSocket 连接（分布式支持）
 
         Returns:
             (是否成功, 错误码, 错误消息)
         """
-        # 先检查限制
+        # 先检查限制（Redis 计数）
         allowed, code, msg = await self.check_connection_limits(user_id)
         if not allowed:
             return False, code, msg
 
-        # 在锁内完成 accept 和注册（防止竞态条件）
+        # 在锁内完成注册（防止竞态条件）
         async with self._lock:
             _logger.info("WS Manager connect called", extra={
                 "session_id": session_id,
                 "user_id": user_id,
                 "global_count": self._global_count,
             })
-            # 再次检查（乐观锁模式）
-            if self._global_count >= self._max_global:
+
+            # 再次检查（乐观锁模式，从 Redis 同步）
+            current_count = await self._sync_global_count_from_redis()
+            if current_count >= self._max_global:
                 return False, "SERVER_FULL", "服务器连接数已满，请稍后重试"
-            user_conn_count = len(self._user_sessions.get(user_id, set()))
-            if user_conn_count >= self._max_per_user:
+
+            current_user_count = await self._get_user_count(user_id)
+            if current_user_count >= self._max_per_user:
                 return False, "TOO_MANY_CONNECTIONS", f"用户连接数超限（最大 {self._max_per_user} 个），请关闭其他连接后重试"
 
-            # 注意: websocket.accept() 已在 websocket.py 中调用，这里不需要重复调用
-            # 重复调用 accept() 会导致 500 错误
-
+            # 更新本地存储
             info = ConnectionInfo(
                 websocket=websocket,
                 user_id=user_id,
@@ -247,6 +363,11 @@ class ConnectionManager:
             self._session_users[session_id] = user_id
             self._user_sessions[user_id].add(session_id)
             self._global_count += 1
+
+            # 更新 Redis 计数
+            await self._increment_global_count()
+            await self._increment_user_count(user_id)
+
             _logger.info(f"Connection registered: {session_id}, initial last_activity={info.last_activity}")
 
         _logger.info(
@@ -266,7 +387,7 @@ class ConnectionManager:
         return True, "", ""
 
     async def disconnect(self, session_id: str) -> None:
-        """断开 WebSocket 连接"""
+        """断开 WebSocket 连接（分布式支持）"""
         async with self._lock:
             info = self._connections.pop(session_id, None)
             user_id = self._session_users.pop(session_id, None)
@@ -278,6 +399,11 @@ class ConnectionManager:
 
             if info:
                 self._global_count = max(0, self._global_count - 1)
+
+        # 清理完成后更新 Redis 计数（在锁外执行）
+        if user_id:
+            await self._decrement_global_count()
+            await self._decrement_user_count(user_id)
 
         if info:
             try:
@@ -326,16 +452,18 @@ class ConnectionManager:
         return session_id in self._connections
 
     def get_user_sessions(self, user_id: str) -> Set[str]:
-        """获取用户的所有会话 ID"""
+        """获取用户的所有会话 ID（仅本地）"""
         return self._user_sessions.get(user_id, set()).copy()
 
-    def get_active_count(self) -> int:
-        """获取全局活跃连接数"""
+    async def get_active_count(self) -> int:
+        """获取全局活跃连接数（分布式支持）"""
+        if self._redis_connected:
+            return await self._sync_global_count_from_redis()
         return self._global_count
 
-    def get_user_count(self, user_id: str) -> int:
-        """获取用户的活跃连接数"""
-        return len(self._user_sessions.get(user_id, set()))
+    async def get_user_count(self, user_id: str) -> int:
+        """获取用户的活跃连接数（分布式支持）"""
+        return await self._get_user_count(user_id)
 
     async def notify_shutdown(self, message: str = "服务即将重启，请重新连接") -> None:
         """通知所有连接优雅关闭"""
@@ -364,8 +492,15 @@ class ConnectionManager:
             return False
 
     async def _heartbeat_loop(self) -> None:
-        """心跳保活循环"""
-        _logger.info(f"Heartbeat loop started, interval={self._heartbeat_interval}s")
+        """
+        心跳保活循环
+
+        改进：避免误判正常连接
+        1. 先检查超时，再决定是否发送 ping
+        2. ping 失败后有宽限期（重试 1 次）
+        3. 只有超过 2 倍超时时间才断开
+        """
+        _logger.info(f"Heartbeat loop started, interval={self._heartbeat_interval}s, timeout={self._heartbeat_timeout}s")
         while True:
             await asyncio.sleep(self._heartbeat_interval)
             now = time.time()
@@ -373,23 +508,29 @@ class ConnectionManager:
 
             async with self._lock:
                 active_count = len(self._connections)
-                _logger.info(f"Heartbeat tick: checking {active_count} connections, timeout={self._heartbeat_timeout}s")
+                _logger.info(f"Heartbeat tick: checking {active_count} connections")
 
                 for session_id, info in list(self._connections.items()):
                     elapsed = now - info.last_activity
-                    _logger.debug(f"Session {session_id}: last_activity={info.last_activity}, elapsed={elapsed:.1f}s")
-                    if elapsed > self._heartbeat_timeout:
-                        _logger.info(f"Session timeout: {session_id}, elapsed={elapsed:.1f}s > {self._heartbeat_timeout}s")
+
+                    # 超过 2 倍超时时间才判定为死连接（给宽限期）
+                    if elapsed > self._heartbeat_timeout * 2:
+                        _logger.info(f"Session dead (2x timeout): {session_id}, elapsed={elapsed:.1f}s")
                         dead_sessions.append(session_id)
-                    else:
+                        continue
+
+                    # 超过 1 倍超时时间，发送 ping 检查
+                    if elapsed > self._heartbeat_timeout:
                         try:
                             await info.websocket.send_json({"type": "ping"})
-                            # 发送 ping 后更新最后活动时间，防止被误判为死连接
-                            info.last_activity = now
-                            _logger.debug(f"Sent heartbeat ping to {session_id}, updated last_activity to {now}")
+                            _logger.debug(f"Sent heartbeat ping to {session_id}")
                         except Exception as e:
-                            _logger.warning(f"Heartbeat send failed for {session_id}: {e}")
-                            dead_sessions.append(session_id)
+                            # ping 失败，给一次重试机会
+                            _logger.warning(f"Heartbeat ping failed for {session_id}: {e}, will retry next tick")
+                            # 不立即断开，下次心跳再检查
+                            continue
+                    else:
+                        _logger.debug(f"Session {session_id} active, elapsed={elapsed:.1f}s")
 
             for session_id in dead_sessions:
                 await self.disconnect(session_id)
@@ -415,3 +556,4 @@ def reset_connection_manager() -> None:
     """重置连接管理器（用于测试）"""
     global _manager
     _manager = None
+    ConnectionManager._instance = None

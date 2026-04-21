@@ -6,9 +6,9 @@
     <title>RAG 智能客服</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap');
-        
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        
+
         :root {
             --bg-primary: #0f1419;
             --bg-secondary: #1a1f2e;
@@ -26,7 +26,7 @@
             --border: #334155;
             --shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.5);
         }
-        
+
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
             background: var(--bg-primary);
@@ -35,7 +35,7 @@
             display: flex;
             flex-direction: column;
         }
-        
+
         /* 顶部导航 */
         .navbar {
             background: var(--bg-secondary);
@@ -47,7 +47,7 @@
             justify-content: space-between;
             backdrop-filter: blur(10px);
         }
-        
+
         .navbar-brand {
             display: flex;
             align-items: center;
@@ -55,18 +55,18 @@
             font-weight: 600;
             font-size: 18px;
         }
-        
+
         .navbar-brand svg {
             width: 32px;
             height: 32px;
         }
-        
+
         .navbar-status {
             display: flex;
             align-items: center;
             gap: 20px;
         }
-        
+
         .status-indicator {
             display: flex;
             align-items: center;
@@ -77,7 +77,7 @@
             font-size: 13px;
             border: 1px solid var(--border);
         }
-        
+
         .status-dot {
             width: 8px;
             height: 8px;
@@ -85,15 +85,15 @@
             background: var(--warning);
             animation: pulse 2s infinite;
         }
-        
+
         .status-dot.connected { background: var(--success); animation: none; }
         .status-dot.error { background: var(--error); animation: pulse 1s infinite; }
-        
+
         @keyframes pulse {
             0%, 100% { opacity: 1; transform: scale(1); }
             50% { opacity: 0.6; transform: scale(0.9); }
         }
-        
+
         .auth-badge {
             display: flex;
             align-items: center;
@@ -104,10 +104,43 @@
             font-size: 12px;
             color: var(--text-secondary);
         }
-        
+
         .auth-badge.authenticated { color: var(--success); }
         .auth-badge.failed { color: var(--error); }
-        
+
+        /* 调试面板按钮 */
+        .debug-toggle {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .debug-toggle:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+        .debug-toggle.active {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+        .debug-toggle .badge {
+            background: var(--error);
+            color: white;
+            padding: 1px 6px;
+            border-radius: 10px;
+            font-size: 10px;
+            min-width: 18px;
+            text-align: center;
+        }
+
         /* 主容器 */
         .main-container {
             flex: 1;
@@ -118,7 +151,7 @@
             padding: 24px;
             gap: 24px;
         }
-        
+
         /* 侧边栏 */
         .sidebar {
             width: 280px;
@@ -127,14 +160,14 @@
             flex-direction: column;
             gap: 16px;
         }
-        
+
         .sidebar-card {
             background: var(--bg-secondary);
             border-radius: 16px;
             border: 1px solid var(--border);
             padding: 20px;
         }
-        
+
         .sidebar-title {
             font-size: 11px;
             text-transform: uppercase;
@@ -142,33 +175,33 @@
             color: var(--text-muted);
             margin-bottom: 12px;
         }
-        
+
         /* 心跳监控 */
         .heartbeat-monitor {
             display: grid;
             grid-template-columns: 1fr 1fr;
             gap: 12px;
         }
-        
+
         .hb-stat {
             background: var(--bg-card);
             border-radius: 10px;
             padding: 12px;
             text-align: center;
         }
-        
+
         .hb-stat-value {
             font-size: 20px;
             font-weight: 600;
             color: var(--accent-light);
         }
-        
+
         .hb-stat-label {
             font-size: 11px;
             color: var(--text-muted);
             margin-top: 4px;
         }
-        
+
         .hb-last-activity {
             margin-top: 12px;
             padding: 10px;
@@ -178,7 +211,7 @@
             color: var(--text-secondary);
             text-align: center;
         }
-        
+
         /* 聊天区域 */
         .chat-container {
             flex: 1;
@@ -190,7 +223,7 @@
             overflow: hidden;
             box-shadow: var(--shadow);
         }
-        
+
         /* 聊天头部 */
         .chat-header {
             background: linear-gradient(135deg, var(--bg-card) 0%, var(--bg-secondary) 100%);
@@ -200,7 +233,7 @@
             align-items: center;
             gap: 16px;
         }
-        
+
         .chat-avatar {
             width: 48px;
             height: 48px;
@@ -212,42 +245,42 @@
             font-size: 24px;
             box-shadow: 0 4px 14px var(--accent-glow);
         }
-        
+
         .chat-info h2 {
             font-size: 16px;
             font-weight: 600;
             margin-bottom: 4px;
         }
-        
+
         .chat-info p {
             font-size: 13px;
             color: var(--text-secondary);
         }
-        
+
         .chat-stats {
             margin-left: auto;
             display: flex;
             gap: 16px;
         }
-        
+
         .chat-stat {
             text-align: center;
             padding: 8px 16px;
             background: var(--bg-card);
             border-radius: 10px;
         }
-        
+
         .chat-stat-value {
             font-size: 18px;
             font-weight: 600;
             color: var(--accent-light);
         }
-        
+
         .chat-stat-label {
             font-size: 11px;
             color: var(--text-muted);
         }
-        
+
         /* 消息区域 */
         .chat-messages {
             flex: 1;
@@ -257,11 +290,11 @@
             flex-direction: column;
             gap: 20px;
         }
-        
+
         .chat-messages::-webkit-scrollbar { width: 6px; }
         .chat-messages::-webkit-scrollbar-track { background: transparent; }
         .chat-messages::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
-        
+
         /* 消息气泡 */
         .message {
             max-width: 70%;
@@ -271,40 +304,40 @@
             animation: slideIn 0.3s ease;
             position: relative;
         }
-        
+
         @keyframes slideIn {
             from { opacity: 0; transform: translateY(10px); }
             to { opacity: 1; transform: translateY(0); }
         }
-        
+
         .message.user {
             align-self: flex-end;
             background: linear-gradient(135deg, var(--accent) 0%, #8b5cf6 100%);
             color: white;
             border-bottom-right-radius: 6px;
         }
-        
+
         .message.assistant {
             align-self: flex-start;
             background: var(--bg-card);
             color: var(--text-primary);
             border-bottom-left-radius: 6px;
         }
-        
+
         .message.error-msg {
             background: rgba(239, 68, 68, 0.15);
             border: 1px solid rgba(239, 68, 68, 0.3);
             color: var(--error);
         }
-        
+
         .message-content { word-break: break-word; white-space: pre-wrap; }
         .message-content .typing-cursor { animation: blink 1s infinite; }
-        
+
         @keyframes blink {
             0%, 50% { opacity: 1; }
             51%, 100% { opacity: 0; }
         }
-        
+
         .message-meta {
             display: flex;
             align-items: center;
@@ -313,7 +346,7 @@
             font-size: 11px;
             opacity: 0.7;
         }
-        
+
         .intent-tag {
             display: inline-flex;
             padding: 3px 8px;
@@ -322,7 +355,7 @@
             border-radius: 4px;
             font-weight: 500;
         }
-        
+
         .sources-info {
             font-size: 11px;
             color: var(--accent-light);
@@ -331,25 +364,25 @@
             align-items: center;
             gap: 4px;
         }
-        
+
         /* 输入区域 */
         .chat-input-area {
             padding: 20px 24px;
             background: var(--bg-card);
             border-top: 1px solid var(--border);
         }
-        
+
         .input-wrapper {
             display: flex;
             gap: 12px;
             align-items: flex-end;
         }
-        
+
         .input-container {
             flex: 1;
             position: relative;
         }
-        
+
         .input-container input {
             width: 100%;
             padding: 14px 20px;
@@ -361,14 +394,14 @@
             outline: none;
             transition: all 0.2s;
         }
-        
+
         .input-container input:focus {
             border-color: var(--accent);
             box-shadow: 0 0 0 3px var(--accent-glow);
         }
-        
+
         .input-container input::placeholder { color: var(--text-muted); }
-        
+
         .btn-send {
             width: 48px;
             height: 48px;
@@ -382,19 +415,19 @@
             transition: all 0.2s;
             box-shadow: 0 4px 14px var(--accent-glow);
         }
-        
+
         .btn-send:hover { transform: scale(1.05); }
         .btn-send:disabled { opacity: 0.5; cursor: not-allowed; transform: none; }
-        
+
         .btn-send svg { width: 20px; height: 20px; stroke: white; }
-        
+
         .quick-questions {
             display: flex;
             gap: 8px;
             margin-top: 12px;
             flex-wrap: wrap;
         }
-        
+
         .quick-q {
             padding: 8px 16px;
             background: var(--bg-secondary);
@@ -405,13 +438,19 @@
             cursor: pointer;
             transition: all 0.2s;
         }
-        
+
         .quick-q:hover {
             background: var(--accent);
             color: white;
             border-color: var(--accent);
         }
-        
+
+        .quick-q.active {
+            background: var(--accent);
+            color: white;
+            border-color: var(--accent);
+        }
+
         /* Toast */
         .toast {
             position: fixed;
@@ -429,20 +468,185 @@
             border: 1px solid var(--border);
             box-shadow: var(--shadow);
         }
-        
+
         .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
         .toast.success { border-color: var(--success); }
         .toast.error { border-color: var(--error); }
-        
+        .toast.warning { border-color: var(--warning); }
+
+        /* 调试面板 */
+        .debug-panel {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+            max-height: 0;
+            overflow: hidden;
+            transition: max-height 0.3s ease;
+            z-index: 1000;
+            box-shadow: 0 -4px 20px rgba(0, 0, 0, 0.3);
+        }
+
+        .debug-panel.open {
+            max-height: 50vh;
+        }
+
+        .debug-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            padding: 12px 20px;
+            background: var(--bg-card);
+            border-bottom: 1px solid var(--border);
+        }
+
+        .debug-header h3 {
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .debug-actions {
+            display: flex;
+            gap: 8px;
+        }
+
+        .debug-btn {
+            padding: 6px 12px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-secondary);
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .debug-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .debug-content {
+            display: flex;
+            height: calc(50vh - 56px);
+        }
+
+        .debug-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 12px;
+        }
+
+        .debug-item {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 10px 12px;
+            background: var(--bg-card);
+            border-radius: 8px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-size: 12px;
+        }
+
+        .debug-item:hover {
+            background: var(--bg-hover);
+        }
+
+        .debug-item .method {
+            font-weight: 600;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-size: 10px;
+        }
+
+        .debug-item .method.GET { background: var(--success); color: white; }
+        .debug-item .method.POST { background: var(--accent); color: white; }
+        .debug-item .method.WS { background: var(--warning); color: white; }
+        .debug-item .method.ERROR { background: var(--error); color: white; }
+
+        .debug-item .url {
+            flex: 1;
+            color: var(--text-secondary);
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .debug-item .status {
+            font-weight: 600;
+            padding: 2px 8px;
+            border-radius: 4px;
+            font-size: 11px;
+        }
+
+        .debug-item .status.success { background: rgba(34, 197, 94, 0.2); color: var(--success); }
+        .debug-item .status.error { background: rgba(239, 68, 68, 0.2); color: var(--error); }
+        .debug-item .status.pending { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+
+        .debug-item .duration {
+            color: var(--text-muted);
+            font-size: 11px;
+        }
+
+        .debug-detail {
+            width: 400px;
+            border-left: 1px solid var(--border);
+            background: var(--bg-primary);
+            overflow-y: auto;
+            padding: 12px;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+        }
+
+        .debug-detail h4 {
+            color: var(--text-primary);
+            margin-bottom: 8px;
+            font-size: 12px;
+        }
+
+        .debug-detail pre {
+            background: var(--bg-card);
+            padding: 10px;
+            border-radius: 6px;
+            overflow-x: auto;
+            white-space: pre-wrap;
+            word-break: break-all;
+            color: var(--text-secondary);
+            max-height: 150px;
+            overflow-y: auto;
+        }
+
+        /* Loading skeleton */
+        .skeleton {
+            background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-hover) 50%, var(--bg-card) 75%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s infinite;
+            border-radius: 4px;
+        }
+
+        @keyframes shimmer {
+            0% { background-position: 200% 0; }
+            100% { background-position: -200% 0; }
+        }
+
         /* 响应式 */
         @media (max-width: 1024px) {
             .sidebar { display: none; }
             .main-container { padding: 16px; }
         }
-        
+
         @media (max-width: 768px) {
             .chat-stats { display: none; }
             .message { max-width: 85%; }
+            .debug-content { flex-direction: column; }
+            .debug-detail { width: 100%; border-left: none; border-top: 1px solid var(--border); }
         }
     </style>
 </head>
@@ -463,8 +667,15 @@
             RAG 智能客服
         </div>
         <div class="navbar-status">
+            <button class="debug-toggle" id="debugToggle" onclick="toggleDebugPanel()">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
+                </svg>
+                网络日志
+                <span class="badge" id="debugBadge" style="display: none;">0</span>
+            </button>
             <div class="auth-badge" id="authBadge">
-                <span>🔐</span>
+                <span>&#128274;</span>
                 <span id="authText">未认证</span>
             </div>
             <div class="status-indicator">
@@ -473,7 +684,7 @@
             </div>
         </div>
     </nav>
-    
+
     <!-- 主内容 -->
     <main class="main-container">
         <!-- 侧边栏 -->
@@ -503,11 +714,11 @@
                 </div>
             </div>
         </aside>
-        
+
         <!-- 聊天区 -->
         <div class="chat-container">
             <div class="chat-header">
-                <div class="chat-avatar">🤖</div>
+                <div class="chat-avatar">&#129302;</div>
                 <div class="chat-info">
                     <h2>智能助手</h2>
                     <p>基于 RAG 的电商问答系统</p>
@@ -523,18 +734,18 @@
                     </div>
                 </div>
             </div>
-            
+
             <div class="chat-messages" id="chatMessages">
                 <div class="message assistant">
                     <div class="message-content">您好！我是 RAG 智能客服助手，有什么可以帮您的吗？</div>
                     <div class="message-meta">
                         <span>在线</span>
-                        <span>•</span>
+                        <span>&#8226;</span>
                         <span>v2.0</span>
                     </div>
                 </div>
             </div>
-            
+
             <div class="chat-input-area">
                 <div class="input-wrapper">
                     <div class="input-container">
@@ -548,700 +759,971 @@
                     </button>
                 </div>
                 <div class="quick-questions">
-                    <span class="quick-q" onclick="askQuestion('查询我的订单状态')">📦 查询订单</span>
-                    <span class="quick-q" onclick="askQuestion('有哪些促销商品？')">🛍️ 促销</span>
-                    <span class="quick-q" onclick="askQuestion('如何申请退换货？')">↩️ 退换货</span>
-                    <span class="quick-q" onclick="askQuestion('有什么优惠政策？')">💰 优惠</span>
+                    <span class="quick-q" onclick="askQuestion('查询我的订单状态', this)">&#128722; 查询订单</span>
+                    <span class="quick-q" onclick="askQuestion('有哪些促销商品？', this)">&#128092; 促销</span>
+                    <span class="quick-q" onclick="askQuestion('如何申请退换货？', this)">&#8617; 退换货</span>
+                    <span class="quick-q" onclick="askQuestion('有什么优惠政策？', this)">&#128176; 优惠</span>
                 </div>
             </div>
         </div>
     </main>
-    
-    <div id="toast" class="toast"></div>
-    
-    <script>
-        // ==================== DOM 元素缓存 ====================
-        const dom = {
-            statusDot: document.getElementById('statusDot'),
-            statusText: document.getElementById('statusText'),
-            authBadge: document.getElementById('authBadge'),
-            authText: document.getElementById('authText'),
-            chatMessages: document.getElementById('chatMessages'),
-            messageInput: document.getElementById('messageInput'),
-            sendBtn: document.getElementById('sendBtn'),
-            toast: document.getElementById('toast'),
-            pingCount: document.getElementById('pingCount'),
-            pongCount: document.getElementById('pongCount'),
-            msgSent: document.getElementById('msgSent'),
-            msgReceived: document.getElementById('msgReceived'),
-            lastActivity: document.getElementById('lastActivity'),
-            sessionCount: document.getElementById('sessionCount'),
-            uptime: document.getElementById('uptime'),
-        };
 
-        // ==================== 配置 ====================
-        const CONFIG = {
-            API_BASE: '',
-            WS_HEARTBEAT_INTERVAL: 30000,  // 30秒，由 config.py 同步
-            WS_HEARTBEAT_TIMEOUT: 60000,    // 60秒
-            MAX_RETRIES: 5,
-            RETRY_DELAY: 2000,
-            RECONNECT_BASE_DELAY: 1000,
-            RECONNECT_MAX_DELAY: 30000,
-        };
-        
-        // ==================== 状态 ====================
-        const state = {
-            ws: null,
-            token: null,
-            sessionId: null,
-            userId: 'user-' + Math.random().toString(36).substr(2, 8),
-            status: 'disconnected', // disconnected, connecting, authenticating, authenticated, connected, reconnecting
-            retryCount: 0,
-            pingCount: 0,
-            pongCount: 0,
-            msgSent: 0,
-            msgReceived: 0,
-            lastPingTime: null,
-            lastPongTime: null,
-            lastActivity: null,
-            connectedAt: null,
-            heartbeatTimer: null,
-            pongTimer: null,
-            reconnectTimer: null,
-            uptimeTimer: null,
-            accumulatedResponse: '',
-            currentPlaceholder: null,
-            // 商品上下文
-            productContext: null,
-            urlSkuId: null,
-            urlSpuId: null,
-        };
-        
-        // ==================== 商品上下文相关 ====================
-        
-        // 解析URL参数
-        function parseUrlParams() {
-            const params = new URLSearchParams(window.location.search);
-            const skuId = params.get('sku_id');
-            const spuId = params.get('spu_id');
-            
-            state.urlSkuId = skuId ? parseInt(skuId) : null;
-            state.urlSpuId = spuId ? parseInt(spuId) : null;
-            
-            return (state.urlSkuId || state.urlSpuId);
+    <!-- Toast -->
+    <div id="toast" class="toast"></div>
+
+    <!-- 调试面板 -->
+    <div class="debug-panel" id="debugPanel">
+        <div class="debug-header">
+            <h3>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M21 12a9 9 0 01-9 9m9-9a9 9 0 00-9-9m9 9H3m9 9a9 9 0 01-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9"/>
+                </svg>
+                网络请求日志
+            </h3>
+            <div class="debug-actions">
+                <button class="debug-btn" onclick="clearDebugLog()">清空</button>
+                <button class="debug-btn" onclick="toggleDebugPanel()">收起</button>
+            </div>
+        </div>
+        <div class="debug-content">
+            <div class="debug-list" id="debugList">
+                <div style="text-align: center; color: var(--text-muted); padding: 20px;">
+                    暂无请求记录
+                </div>
+            </div>
+            <div class="debug-detail" id="debugDetail">
+                <h4>请求详情</h4>
+                <p style="color: var(--text-muted)">点击左侧请求查看详情</p>
+            </div>
+        </div>
+    </div>
+
+<script>
+/**
+ * ============================================================================
+ * RAG 智能客服 - 前端脚本
+ * ============================================================================
+ *
+ * API_CONFIG: 所有后端接口配置
+ * ------------------------------------------------------------
+ * 认证:
+ *   POST /api/v1/debug/auth/token
+ *   Request:  { user_id: string, role: string }
+ *   Response: { success: bool, token: string, expires_in: int }
+ *
+ * WebSocket:
+ *   ws://host/ws/chat?token={token}&session_id={id}&sku_id={id}&spu_id={id}
+ *
+ * 商品上下文:
+ *   GET /products/context?sku_id={id}&spu_id={id}
+ *   Response: { success: bool, data: { product_name, product_type, ... } }
+ *
+ * ============================================================================
+ */
+
+(function() {
+    'use strict';
+
+    // ==================== API 配置 ====================
+    /**
+     * API_CONFIG - 集中管理所有 API 端点配置
+     * 使用说明：
+     * - BASE_URL: 后端服务根地址，生产环境应通过环境变量配置
+     * - TIMEOUT: 请求超时时间（毫秒）
+     * - RETRY_CONFIG: 重试策略配置
+     */
+    const API_CONFIG = {
+        BASE_URL: '',  // 空字符串表示使用当前域名，生产环境可设置为 'http://api.example.com'
+        TIMEOUT: 30000,  // 30秒超时
+        RETRY_ENABLED: true,
+        RETRY_CONFIG: {
+            maxRetries: 1,        // 最多重试1次
+            retryDelay: 1000,      // 重试间隔1秒
+            retryOn: [0, 408, 500, 502, 503, 504]  // 仅在这些状态码时重试
+        },
+        ENDPOINTS: {
+            // 认证
+            AUTH_TOKEN: '/api/v1/debug/auth/token',
+
+            // 商品上下文 (product.py 前缀是 /products，不是 /api/v1/products)
+            PRODUCT_CONTEXT: '/products/context',
+
+            // WebSocket 路径
+            WS_CHAT: '/ws/chat',
+
+            // 健康检查
+            HEALTH: '/api/v1/health'
         }
-        
-        // 加载商品上下文（REST API）
-        async function loadProductContext() {
-            if (!state.urlSkuId && !state.urlSpuId) return null;
-            
-            try {
-                const params = new URLSearchParams();
-                if (state.urlSkuId) params.append('sku_id', state.urlSkuId);
-                if (state.urlSpuId) params.append('spu_id', state.urlSpuId);
-                
-                const response = await fetch(`/api/v1/products/context?${params.toString()}`);
-                const data = await response.json();
-                
-                if (data.success && data.data) {
-                    state.productContext = data.data;
-                    addProductCard(data.data);
-                    return data.data;
-                } else {
-                    console.warn('商品上下文加载失败:', data.error);
-                }
-            } catch (error) {
-                console.error('加载商品上下文失败:', error);
+    };
+
+    // ==================== 网络请求日志系统 ====================
+    /**
+     * RequestLogger - 记录所有网络请求，便于调试和排查问题
+     * 功能：
+     * - 记录最近20次请求
+     * - 显示请求方法、URL、状态码、耗时
+     * - 支持展开查看 Request/Response Headers & Body
+     */
+    const RequestLogger = {
+        logs: [],
+        maxLogs: 20,
+        selectedId: null,
+
+        /**
+         * 添加请求日志
+         * @param {Object} entry - 请求记录
+         * @param {string} entry.id - 唯一标识
+         * @param {string} entry.method - HTTP方法或 'WS'
+         * @param {string} entry.url - 请求URL
+         * @param {number} entry.status - HTTP状态码
+         * @param {number} entry.duration - 耗时（毫秒）
+         * @param {Object} entry.request - 请求头/体
+         * @param {Object} entry.response - 响应头/体
+         * @param {string} entry.type - 'http' | 'ws_send' | 'ws_recv' | 'error'
+         */
+        add(entry) {
+            entry.timestamp = Date.now();
+            this.logs.unshift(entry);
+            if (this.logs.length > this.maxLogs) {
+                this.logs.pop();
             }
-            return null;
-        }
-        
-        // 添加商品信息卡片到聊天界面
-        function addProductCard(productContext) {
-            const container = dom.chatMessages;
-            
-            // 避免重复添加
-            const existingCards = container.querySelectorAll('.product-info-card');
-            if (existingCards.length > 0) return;
-            
-            // 构建商品信息HTML
-            let infoHtml = '';
-            
-            // 商品名称和类型标签
-            infoHtml += `<div style="font-weight:700;font-size:14px;margin-bottom:8px;color:var(--accent-light);display:flex;align-items:center;gap:8px">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 00-1-1.73l-7-4a2 2 0 00-2 0l-7 4A2 2 0 003 8v8a2 2 0 001 1.73l7 4a2 2 0 002 0l7-4A2 2 0 0021 16z"/><polyline points="3.27,6.96 12,12.01 20.73,6.96"/><line x1="12" y1="22.08" x2="12" y2="12"/></svg>
-                ${escapeHtml(productContext.product_name || '商品')}
-                <span style="font-weight:400;font-size:11px;color:var(--text-muted);margin-left:4px">
-                    [${productContext.product_type || 'SPU'}]
-                </span>
-            </div>`;
-            
-            // 价格和库存
-            if (productContext.product_type === 'SKU') {
-                if (productContext.sku_price !== undefined && productContext.sku_price !== null) {
-                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
-                        💰 价格: $${productContext.sku_price.toFixed(2)}
-                    </div>`;
-                }
-                if (productContext.sku_stock !== undefined && productContext.sku_stock !== null) {
-                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
-                        📦 库存: ${productContext.sku_stock}
-                    </div>`;
-                }
-                if (productContext.properties) {
-                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
-                        ⚙️ 规格: ${escapeHtml(JSON.stringify(productContext.properties))}
-                    </div>`;
-                }
-                if (productContext.bar_code) {
-                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
-                        📊 条形码: ${escapeHtml(productContext.bar_code)}
-                    </div>`;
-                }
-            } else {
-                if (productContext.price !== undefined && productContext.price !== null) {
-                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
-                        💰 价格: $${productContext.price.toFixed(2)}
-                    </div>`;
-                }
-                if (productContext.stock !== undefined && productContext.stock !== null) {
-                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
-                        📦 库存: ${productContext.stock}
-                    </div>`;
-                }
-                if (productContext.market_price !== undefined && productContext.market_price !== null) {
-                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
-                        🏷️ 市场价: $${productContext.market_price.toFixed(2)}
-                    </div>`;
-                }
-                if (productContext.sales_count !== undefined) {
-                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin-bottom:4px">
-                        🔥 销量: ${productContext.sales_count}
-                    </div>`;
-                }
+            this.render();
+            this.updateBadge();
+        },
+
+        /**
+         * 更新请求状态（如进行中 -> 完成）
+         */
+        update(id, updates) {
+            const log = this.logs.find(l => l.id === id);
+            if (log) {
+                Object.assign(log, updates);
+                this.render();
             }
-            
-            // 商品简介
-            if (productContext.parsed_introduction && productContext.parsed_introduction.length > 0) {
-                const introTexts = productContext.parsed_introduction
-                    .filter(seg => seg.type === 'text')
-                    .map(seg => seg.content)
-                    .join(' ');
-                if (introTexts) {
-                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin:8px 0;padding:8px;background:var(--bg-card);border-radius:8px;border-left:3px solid var(--accent)">
-                        <div style="font-weight:600;margin-bottom:4px">📝 商品简介:</div>
-                        ${escapeHtml(introTexts.slice(0, 300))}${introTexts.length > 300 ? '...' : ''}
+        },
+
+        /**
+         * 清空所有日志
+         */
+        clear() {
+            this.logs = [];
+            this.selectedId = null;
+            this.render();
+            this.updateBadge();
+        },
+
+        /**
+         * 渲染日志列表
+         */
+        render() {
+            const container = document.getElementById('debugList');
+            if (!container) return;
+
+            if (this.logs.length === 0) {
+                container.innerHTML = `
+                    <div style="text-align: center; color: var(--text-muted); padding: 20px;">
+                        暂无请求记录
                     </div>`;
-                }
-            }
-            
-            // 商品详情（简要）
-            if (productContext.parsed_description && productContext.parsed_description.length > 0) {
-                const descTexts = productContext.parsed_description
-                    .filter(seg => seg.type === 'text')
-                    .map(seg => seg.content)
-                    .join(' ');
-                if (descTexts) {
-                    infoHtml += `<div style="font-size:12px;color:var(--text-secondary);margin:8px 0;padding:8px;background:var(--bg-card);border-radius:8px;border-left:3px solid var(--violet)">
-                        <div style="font-weight:600;margin-bottom:4px">📋 商品详情:</div>
-                        ${escapeHtml(descTexts.slice(0, 200))}${descTexts.length > 200 ? '...' : ''}
-                    </div>`;
-                }
-            }
-            
-            // 标记特殊属性
-            const badges = [];
-            if (productContext.has_images) {
-                badges.push(`<span style="font-size:10px;background:var(--success);color:white;padding:2px 8px;border-radius:12px;margin-right:4px">📷 含图片</span>`);
-            }
-            if (productContext.has_html) {
-                badges.push(`<span style="font-size:10px;background:var(--warning);color:white;padding:2px 8px;border-radius:12px;margin-right:4px">📄 HTML</span>`);
-            }
-            if (badges.length > 0) {
-                infoHtml += `<div style="margin-top:8px">${badges.join('')}</div>`;
-            }
-            
-            // 创建卡片
-            const card = document.createElement('div');
-            card.className = 'message assistant product-info-card';
-            card.innerHTML = `<div class="message-content">${infoHtml}</div>
-                <div class="message-meta">
-                    <span>✅ 商品信息已加载 · ID: ${state.urlSkuId || state.urlSpuId}</span>
-                </div>`;
-            container.appendChild(card);
-            container.scrollTop = container.scrollHeight;
-        }
-        
-        // 将商品上下文保存到sessionStorage，供后端RAG流程使用
-        function saveProductContextToSession() {
-            if (state.productContext) {
-                sessionStorage.setItem('product_context', JSON.stringify(state.productContext));
-            }
-        }
-        
-        // ==================== 工具函数 ====================
-        function showToast(msg, type = 'info') {
-            dom.toast.textContent = msg;
-            dom.toast.className = 'toast show ' + type;
-            setTimeout(() => { dom.toast.className = 'toast'; }, 3000);
-        }
-        
-        function updateActivity() {
-            state.lastActivity = Date.now();
-            const time = new Date().toLocaleTimeString();
-            dom.lastActivity.textContent = `最后活动: ${time}`;
-        }
-        
-        function updateStats() {
-            dom.pingCount.textContent = state.pingCount;
-            dom.pongCount.textContent = state.pongCount;
-            dom.msgSent.textContent = state.msgSent;
-            dom.msgReceived.textContent = state.msgReceived;
-        }
-        
-        function updateUptime() {
-            if (!state.connectedAt) {
-                dom.uptime.textContent = '0s';
                 return;
             }
-            const elapsed = Math.floor((Date.now() - state.connectedAt) / 1000);
-            const mins = Math.floor(elapsed / 60);
-            const secs = elapsed % 60;
-            dom.uptime.textContent = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
-        }
-        
-        function setStatus(status, text) {
-            state.status = status;
-            dom.statusDot.className = 'status-dot';
-            
-            switch (status) {
-                case 'disconnected':
-                case 'reconnecting':
-                    dom.statusText.textContent = text || '重连中...';
-                    break;
-                case 'connecting':
-                    dom.statusText.textContent = text || '连接中...';
-                    break;
-                case 'authenticating':
-                    dom.statusText.textContent = text || '认证中...';
-                    break;
-                case 'connected':
-                    dom.statusDot.classList.add('connected');
-                    dom.statusText.textContent = text || '已连接';
-                    break;
-                case 'error':
-                    dom.statusDot.classList.add('error');
-                    dom.statusText.textContent = text || '连接失败';
-                    break;
+
+            container.innerHTML = this.logs.map(log => {
+                const methodClass = log.method?.toUpperCase() || 'WS';
+                const statusClass = log.status >= 200 && log.status < 300 ? 'success' :
+                                   log.status === 0 || log.status >= 400 ? 'error' : 'pending';
+
+                return `
+                    <div class="debug-item ${this.selectedId === log.id ? 'selected' : ''}"
+                         onclick="RequestLogger.select('${log.id}')"
+                         style="${this.selectedId === log.id ? 'border: 1px solid var(--accent);' : ''}">
+                        <span class="method ${methodClass}">${log.method || 'WS'}</span>
+                        <span class="url">${this.truncateUrl(log.url)}</span>
+                        <span class="status ${statusClass}">${log.status || '...'}</span>
+                        <span class="duration">${log.duration ? log.duration + 'ms' : ''}</span>
+                    </div>
+                `;
+            }).join('');
+        },
+
+        /**
+         * 选择日志项，显示详情
+         */
+        select(id) {
+            this.selectedId = id;
+            this.render();
+            this.renderDetail();
+        },
+
+        /**
+         * 渲染选中项的详情
+         */
+        renderDetail() {
+            const container = document.getElementById('debugDetail');
+            if (!container) return;
+
+            const log = this.logs.find(l => l.id === this.selectedId);
+            if (!log) {
+                container.innerHTML = `
+                    <h4>请求详情</h4>
+                    <p style="color: var(--text-muted)">点击左侧请求查看详情</p>`;
+                return;
+            }
+
+            const requestHeaders = log.request?.headers || {};
+            const responseHeaders = log.response?.headers || {};
+
+            container.innerHTML = `
+                <h4>请求详情</h4>
+                <div style="margin-bottom: 16px;">
+                    <strong style="color: var(--text-primary);">URL:</strong>
+                    <pre>${log.url}</pre>
+                </div>
+                ${log.method ? `
+                <div style="margin-bottom: 16px;">
+                    <strong style="color: var(--text-primary);">Request Headers:</strong>
+                    <pre>${JSON.stringify(requestHeaders, null, 2)}</pre>
+                </div>
+                ` : ''}
+                ${log.request?.body ? `
+                <div style="margin-bottom: 16px;">
+                    <strong style="color: var(--text-primary);">Request Body:</strong>
+                    <pre>${JSON.stringify(log.request.body, null, 2)}</pre>
+                </div>
+                ` : ''}
+                ${log.response ? `
+                <div style="margin-bottom: 16px;">
+                    <strong style="color: var(--text-primary);">Status: ${log.status}</strong>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <strong style="color: var(--text-primary);">Response Headers:</strong>
+                    <pre>${JSON.stringify(responseHeaders, null, 2)}</pre>
+                </div>
+                <div style="margin-bottom: 16px;">
+                    <strong style="color: var(--text-primary);">Response Body:</strong>
+                    <pre>${this.formatResponse(log.response.body)}</pre>
+                </div>
+                ` : ''}
+                <div style="margin-bottom: 16px;">
+                    <strong style="color: var(--text-primary);">耗时:</strong>
+                    <pre>${log.duration ? log.duration + ' ms' : 'N/A'}</pre>
+                </div>
+            `;
+        },
+
+        /**
+         * 格式化响应体（截断过长的内容）
+         */
+        formatResponse(body) {
+            if (!body) return 'N/A';
+            const str = typeof body === 'string' ? body : JSON.stringify(body, null, 2);
+            return str.length > 2000 ? str.slice(0, 2000) + '\n\n... (truncated)' : str;
+        },
+
+        /**
+         * 截断URL显示
+         */
+        truncateUrl(url) {
+            if (!url) return '';
+            if (url.length > 60) {
+                return url.slice(0, 30) + '...' + url.slice(-25);
+            }
+            return url;
+        },
+
+        /**
+         * 更新调试面板徽章数量
+         */
+        updateBadge() {
+            const badge = document.getElementById('debugBadge');
+            if (badge) {
+                badge.textContent = this.logs.length;
+                badge.style.display = this.logs.length > 0 ? 'inline' : 'none';
             }
         }
-        
-        function setAuthStatus(authenticated, text) {
-            dom.authBadge.className = 'auth-badge ' + (authenticated ? 'authenticated' : 'failed');
-            dom.authText.textContent = text || (authenticated ? '已认证' : '认证失败');
-        }
-        
-        // ==================== 消息处理 ====================
-        function handleMessage(data) {
-            state.msgReceived++;
-            updateStats();
-            updateActivity();
-            
-            switch (data.type) {
-                case 'chunk':
-                    handleChunk(data);
-                    break;
-                    
-                case 'done':
-                    handleDone(data);
-                    break;
-                    
-                case 'message_received':
-                    state.sessionId = data.session_id;
-                    dom.sessionCount.textContent = state.sessionId?.substr(0, 8) || '-';
-                    state.accumulatedResponse = '';
-                    break;
-                
-                case 'connected':
-                    // WebSocket连接成功，处理商品上下文
-                    if (data.product_context) {
-                        state.productContext = data.product_context;
-                        addProductCard(data.product_context);
-                        showToast(`已加载商品: ${data.product_context.product_name}`, 'success');
-                    }
-                    break;
-                    
-                case 'error':
-                    handleError(data);
-                    break;
-                    
-                case 'message_deleted':
-                    handleDeleted(data);
-                    break;
-                    
-                case 'ping':
-                    handleServerPing(data);
-                    break;
-                    
-                case 'pong':
-                    handlePong(data);
-                    break;
-                    
-                default:
-                    console.log('Unknown message type:', data.type);
+    };
+
+    // ==================== 网络请求封装 ====================
+    /**
+     * apiFetch - 带重试和日志的 fetch 封装
+     *
+     * @param {string} url - 请求URL
+     * @param {Object} options - fetch 选项
+     * @returns {Promise<Object>} 解析后的响应数据
+     */
+    async function apiFetch(url, options = {}) {
+        const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
+        const startTime = Date.now();
+
+        // 构建完整URL
+        const fullUrl = url.startsWith('http') ? url : API_CONFIG.BASE_URL + url;
+
+        // 记录请求
+        RequestLogger.add({
+            id: requestId,
+            method: options.method || 'GET',
+            url: fullUrl,
+            status: 0,
+            type: 'http',
+            request: {
+                headers: options.headers || {},
+                body: options.body ? JSON.parse(options.body) : null
             }
-        }
-        
-        function handleChunk(data) {
-            if (state.currentPlaceholder) {
-                state.accumulatedResponse += data.content;
-                const contentEl = state.currentPlaceholder.querySelector('.message-content');
-                if (contentEl) {
-                    contentEl.innerHTML = escapeHtml(state.accumulatedResponse) + '<span class="typing-cursor">▌</span>';
-                }
-                dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+        });
+
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.TIMEOUT);
+
+        try {
+            const response = await fetch(fullUrl, {
+                ...options,
+                signal: controller.signal
+            });
+
+            clearTimeout(timeoutId);
+
+            const duration = Date.now() - startTime;
+            const contentType = response.headers.get('content-type');
+            let body;
+
+            if (contentType && contentType.includes('application/json')) {
+                body = await response.json();
+            } else {
+                body = await response.text();
             }
-        }
-        
-        function handleDone(data) {
-            if (state.currentPlaceholder) {
-                const contentEl = state.currentPlaceholder.querySelector('.message-content');
-                if (contentEl) {
-                    contentEl.textContent = state.accumulatedResponse || '（无内容）';
+
+            // 更新日志
+            RequestLogger.update(requestId, {
+                status: response.status,
+                duration,
+                response: {
+                    headers: Object.fromEntries(response.headers.entries()),
+                    body
                 }
-                
-                let metaHtml = '<div class="message-meta">';
-                if (data.intent) {
-                    metaHtml += `<span class="intent-tag">${escapeHtml(data.intent)}</span>`;
-                }
-                metaHtml += '</div>';
-                
-                if (data.sources && data.sources.length > 0) {
-                    metaHtml += `<div class="sources-info">📚 来源: ${escapeHtml(data.sources.slice(0, 3).join(', '))}</div>`;
-                }
-                
-                state.currentPlaceholder.innerHTML += metaHtml;
+            });
+
+            // 打印到 console.debug 便于开发者调试
+            console.debug(`[API] ${options.method || 'GET'} ${url}`, {
+                status: response.status,
+                duration: duration + 'ms',
+                data: body
+            });
+
+            return { ok: response.ok, status: response.status, data: body };
+
+        } catch (error) {
+            clearTimeout(timeoutId);
+            const duration = Date.now() - startTime;
+
+            // 判断是否应该重试
+            const shouldRetry = API_CONFIG.RETRY_ENABLED &&
+                API_CONFIG.RETRY_CONFIG.retryOn.includes(0) &&
+                API_CONFIG.RETRY_CONFIG.maxRetries > 0;
+
+            if (shouldRetry) {
+                console.debug(`[API] Retrying ${url}... (1/${API_CONFIG.RETRY_CONFIG.maxRetries})`);
+                await new Promise(r => setTimeout(r, API_CONFIG.RETRY_CONFIG.retryDelay));
+                return apiFetch(url, options);  // 递归重试
             }
-            
-            state.sessionId = data.session_id;
-            dom.sessionCount.textContent = state.sessionId?.substr(0, 8) || '-';
-            state.currentPlaceholder = null;
-            state.accumulatedResponse = '';
-            dom.sendBtn.disabled = false;
+
+            // 更新日志为错误
+            RequestLogger.update(requestId, {
+                status: 0,
+                duration,
+                error: error.message
+            });
+
+            console.debug(`[API Error] ${options.method || 'GET'} ${url}`, {
+                error: error.message,
+                duration: duration + 'ms'
+            });
+
+            return { ok: false, status: 0, error: error.message };
+        }
+    }
+
+    // ==================== DOM 元素缓存 ====================
+    const dom = {
+        statusDot: document.getElementById('statusDot'),
+        statusText: document.getElementById('statusText'),
+        authBadge: document.getElementById('authBadge'),
+        authText: document.getElementById('authText'),
+        chatMessages: document.getElementById('chatMessages'),
+        messageInput: document.getElementById('messageInput'),
+        sendBtn: document.getElementById('sendBtn'),
+        toast: document.getElementById('toast'),
+        pingCount: document.getElementById('pingCount'),
+        pongCount: document.getElementById('pongCount'),
+        msgSent: document.getElementById('msgSent'),
+        msgReceived: document.getElementById('msgReceived'),
+        lastActivity: document.getElementById('lastActivity'),
+        sessionCount: document.getElementById('sessionCount'),
+        uptime: document.getElementById('uptime'),
+        debugPanel: document.getElementById('debugPanel'),
+        debugToggle: document.getElementById('debugToggle'),
+        debugList: document.getElementById('debugList'),
+        debugDetail: document.getElementById('debugDetail'),
+        debugBadge: document.getElementById('debugBadge')
+    };
+
+    // ==================== 状态 ====================
+    const state = {
+        ws: null,
+        token: null,
+        sessionId: null,
+        userId: 'user-' + Math.random().toString(36).substr(2, 8),
+        status: 'disconnected',
+        retryCount: 0,
+        pingCount: 0,
+        pongCount: 0,
+        msgSent: 0,
+        msgReceived: 0,
+        lastPingTime: null,
+        lastPongTime: null,
+        lastActivity: null,
+        connectedAt: null,
+        heartbeatTimer: null,
+        pongTimer: null,
+        reconnectTimer: null,
+        uptimeTimer: null,
+        accumulatedResponse: '',
+        currentPlaceholder: null,
+        productContext: null,
+        urlSkuId: null,
+        urlSpuId: null,
+        quickQuestionActive: null
+    };
+
+    // ==================== 调试面板控制 ====================
+    function toggleDebugPanel() {
+        const panel = dom.debugPanel;
+        const toggle = dom.debugToggle;
+
+        if (panel.classList.contains('open')) {
+            panel.classList.remove('open');
+            toggle.classList.remove('active');
+        } else {
+            panel.classList.add('open');
+            toggle.classList.add('active');
+        }
+    }
+
+    function clearDebugLog() {
+        RequestLogger.clear();
+        document.getElementById('debugDetail').innerHTML = `
+            <h4>请求详情</h4>
+            <p style="color: var(--text-muted)">点击左侧请求查看详情</p>`;
+    }
+
+    // ==================== 工具函数 ====================
+    function showToast(msg, type = 'info') {
+        dom.toast.textContent = msg;
+        dom.toast.className = 'toast show ' + type;
+        setTimeout(() => { dom.toast.className = 'toast'; }, 3000);
+    }
+
+    function updateActivity() {
+        state.lastActivity = Date.now();
+        const time = new Date().toLocaleTimeString();
+        dom.lastActivity.textContent = `最后活动: ${time}`;
+    }
+
+    function updateStats() {
+        dom.pingCount.textContent = state.pingCount;
+        dom.pongCount.textContent = state.pongCount;
+        dom.msgSent.textContent = state.msgSent;
+        dom.msgReceived.textContent = state.msgReceived;
+    }
+
+    function updateUptime() {
+        if (!state.connectedAt) {
+            dom.uptime.textContent = '0s';
+            return;
+        }
+        const elapsed = Math.floor((Date.now() - state.connectedAt) / 1000);
+        const mins = Math.floor(elapsed / 60);
+        const secs = elapsed % 60;
+        dom.uptime.textContent = mins > 0 ? `${mins}m ${secs}s` : `${secs}s`;
+    }
+
+    function setStatus(status, text) {
+        state.status = status;
+        dom.statusDot.className = 'status-dot';
+
+        switch (status) {
+            case 'disconnected':
+            case 'reconnecting':
+                dom.statusText.textContent = text || '重连中...';
+                break;
+            case 'connecting':
+                dom.statusText.textContent = text || '连接中...';
+                break;
+            case 'authenticating':
+                dom.statusText.textContent = text || '认证中...';
+                break;
+            case 'connected':
+                dom.statusDot.classList.add('connected');
+                dom.statusText.textContent = text || '已连接';
+                break;
+            case 'error':
+                dom.statusDot.classList.add('error');
+                dom.statusText.textContent = text || '连接失败';
+                break;
+        }
+    }
+
+    function setAuthStatus(authenticated, text) {
+        dom.authBadge.className = 'auth-badge ' + (authenticated ? 'authenticated' : 'failed');
+        dom.authText.textContent = text || (authenticated ? '已认证' : '认证失败');
+    }
+
+    // ==================== 消息处理 ====================
+    function handleMessage(data) {
+        state.msgReceived++;
+        updateStats();
+        updateActivity();
+
+        // 记录 WebSocket 收到的消息
+        RequestLogger.add({
+            id: 'ws_' + Date.now(),
+            method: 'WS',
+            url: '/ws/chat',
+            type: 'ws_recv',
+            status: data.type === 'error' ? 0 : 200,
+            response: { body: data }
+        });
+
+        switch (data.type) {
+            case 'chunk':
+                handleChunk(data);
+                break;
+            case 'done':
+                handleDone(data);
+                break;
+            case 'message_received':
+                state.sessionId = data.session_id;
+                dom.sessionCount.textContent = state.sessionId?.substr(0, 8) || '-';
+                state.accumulatedResponse = '';
+                break;
+            case 'connected':
+                if (data.product_context) {
+                    state.productContext = data.product_context;
+                    addProductCard(data.product_context);
+                    showToast(`已加载商品: ${data.product_context.product_name}`, 'success');
+                }
+                break;
+            case 'error':
+                handleError(data);
+                break;
+            case 'message_deleted':
+                handleDeleted(data);
+                break;
+            case 'ping':
+                handleServerPing(data);
+                break;
+            case 'pong':
+                handlePong(data);
+                break;
+            default:
+                console.debug('[WS] Unknown message type:', data.type);
+        }
+    }
+
+    function handleChunk(data) {
+        if (state.currentPlaceholder) {
+            state.accumulatedResponse += data.content;
+            const contentEl = state.currentPlaceholder.querySelector('.message-content');
+            if (contentEl) {
+                contentEl.innerHTML = escapeHtml(state.accumulatedResponse) + '<span class="typing-cursor">&#9608;</span>';
+            }
             dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
         }
-        
-        function handleError(data) {
-            if (state.currentPlaceholder) {
-                const contentEl = state.currentPlaceholder.querySelector('.message-content');
-                if (contentEl) {
-                    contentEl.innerHTML = `<span style="color: var(--error)">错误: ${escapeHtml(data.message)}</span>`;
-                }
+    }
+
+    function handleDone(data) {
+        if (state.currentPlaceholder) {
+            const contentEl = state.currentPlaceholder.querySelector('.message-content');
+            if (contentEl) {
+                contentEl.textContent = state.accumulatedResponse || '（无内容）';
             }
-            state.currentPlaceholder = null;
-            state.accumulatedResponse = '';
-            dom.sendBtn.disabled = false;
-            showToast(data.message || '发生错误', 'error');
-        }
-        
-        function handleDeleted(data) {
-            if (data.success) {
-                const messages = dom.chatMessages.querySelectorAll('.message');
-                if (messages.length >= 2) {
-                    dom.chatMessages.removeChild(messages[messages.length - 1]);
-                    dom.chatMessages.removeChild(messages[messages.length - 2]);
-                }
-                showToast('消息已撤回', 'success');
-            } else {
-                showToast(data.message || '撤回失败', 'error');
+
+            let metaHtml = '<div class="message-meta">';
+            if (data.intent) {
+                metaHtml += `<span class="intent-tag">${escapeHtml(data.intent)}</span>`;
             }
-        }
-        
-        function handleServerPing(data) {
-            // 服务器发来的 ping，回复 pong
-            if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-                state.ws.send(JSON.stringify({
-                    type: 'pong',
-                    timestamp: data.timestamp || Date.now()
-                }));
+            metaHtml += '</div>';
+
+            if (data.sources && data.sources.length > 0) {
+                metaHtml += `<div class="sources-info">&#128218; 来源: ${escapeHtml(data.sources.slice(0, 3).join(', '))}</div>`;
             }
+
+            state.currentPlaceholder.innerHTML += metaHtml;
         }
-        
-        function handlePong(data) {
-            // 收到对客户端 ping 的响应
-            state.pongCount++;
-            state.lastPongTime = Date.now();
-            clearTimeout(state.pongTimer);
-            updateStats();
-        }
-        
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-        
-        // ==================== 心跳 ====================
-        function startHeartbeat() {
-            stopHeartbeat();
-            
-            // 主心跳定时器
-            state.heartbeatTimer = setInterval(() => {
-                if (state.ws && state.ws.readyState === WebSocket.OPEN) {
-                    // 发送 ping
-                    state.ws.send(JSON.stringify({
-                        type: 'ping',
-                        timestamp: Date.now()
-                    }));
-                    state.pingCount++;
-                    state.lastPingTime = Date.now();
-                    updateStats();
-                    
-                    // 设置 pong 超时
-                    state.pongTimer = setTimeout(() => {
-                        console.error('Pong timeout - connection may be dead');
-                        setStatus('error', '心跳超时');
-                        state.ws.close();
-                    }, CONFIG.WS_HEARTBEAT_TIMEOUT);
-                }
-            }, CONFIG.WS_HEARTBEAT_INTERVAL);
-            
-            // 在线时长定时器
-            state.uptimeTimer = setInterval(updateUptime, 1000);
-        }
-        
-        function stopHeartbeat() {
-            if (state.heartbeatTimer) {
-                clearInterval(state.heartbeatTimer);
-                state.heartbeatTimer = null;
-            }
-            if (state.pongTimer) {
-                clearTimeout(state.pongTimer);
-                state.pongTimer = null;
-            }
-            if (state.uptimeTimer) {
-                clearInterval(state.uptimeTimer);
-                state.uptimeTimer = null;
+
+        state.sessionId = data.session_id;
+        dom.sessionCount.textContent = state.sessionId?.substr(0, 8) || '-';
+        state.currentPlaceholder = null;
+        state.accumulatedResponse = '';
+        dom.sendBtn.disabled = false;
+        dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+    }
+
+    function handleError(data) {
+        if (state.currentPlaceholder) {
+            const contentEl = state.currentPlaceholder.querySelector('.message-content');
+            if (contentEl) {
+                contentEl.innerHTML = `<span style="color: var(--error)">错误: ${escapeHtml(data.message)}</span>`;
             }
         }
-        
-        // ==================== 重连 ====================
-        function scheduleReconnect() {
-            if (state.retryCount >= CONFIG.MAX_RETRIES) {
-                setStatus('error', '连接失败');
-                showToast(`连接失败，已达到最大重试次数 (${CONFIG.MAX_RETRIES})`, 'error');
-                return;
+        state.currentPlaceholder = null;
+        state.accumulatedResponse = '';
+        dom.sendBtn.disabled = false;
+        showToast(data.message || '发生错误', 'error');
+    }
+
+    function handleDeleted(data) {
+        if (data.success) {
+            const messages = dom.chatMessages.querySelectorAll('.message');
+            if (messages.length >= 2) {
+                dom.chatMessages.removeChild(messages[messages.length - 1]);
+                dom.chatMessages.removeChild(messages[messages.length - 2]);
             }
-            
-            // 指数退避
-            const delay = Math.min(
-                CONFIG.RECONNECT_BASE_DELAY * Math.pow(2, state.retryCount),
-                CONFIG.RECONNECT_MAX_DELAY
-            );
-            
-            setStatus('reconnecting', `重连中 (${state.retryCount + 1}/${CONFIG.MAX_RETRIES})...`);
-            
-            state.reconnectTimer = setTimeout(() => {
-                state.retryCount++;
-                connectWebSocket();
-            }, delay);
+            showToast('消息已撤回', 'success');
+        } else {
+            showToast(data.message || '撤回失败', 'error');
         }
-        
-        // ==================== WebSocket ====================
-        async function init() {
-            setStatus('connecting', '获取认证...');
-            
-            // 解析URL参数
-            const hasProductParams = parseUrlParams();
-            if (hasProductParams) {
-                const info = [];
-                if (state.urlSkuId) info.push(`SKU: ${state.urlSkuId}`);
-                if (state.urlSpuId) info.push(`SPU: ${state.urlSpuId}`);
-                console.log('检测到商品参数:', info.join(', '));
-            }
-            
-            // 获取 token
-            try {
-                const response = await fetch(`${CONFIG.API_BASE}/api/v1/debug/auth/token`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ user_id: state.userId, role: 'user' })
-                });
+    }
 
-                if (!response.ok) {
-                    const errorData = await response.json().catch(() => ({}));
-                    throw new Error(errorData.message || `HTTP ${response.status}: 认证接口返回错误`);
-                }
-
-                const data = await response.json();
-
-                if (!data.token) {
-                    throw new Error('认证接口未返回token');
-                }
-
-                state.token = data.token;
-                setAuthStatus(true, '已认证');
-                console.log('Token acquired successfully:', state.token.substring(0, 30) + '...');
-
-            } catch (err) {
-                console.error('Auth error:', err);
-                setAuthStatus(false, '认证失败');
-                showToast('认证失败: ' + err.message, 'error');
-                return;  // 认证失败，停止连接
-            }
-
-            console.log('Token obtained, connecting to WebSocket...');
-            connectWebSocket();
-        }
-        
-        function connectWebSocket() {
-            if (state.ws) {
-                state.ws.close();
-                state.ws = null;
-            }
-
-            // 确保 token 存在
-            if (!state.token) {
-                console.error('No token available, cannot connect WebSocket');
-                setStatus('error', '未获取到认证令牌');
-                showToast('请先获取认证令牌', 'error');
-                return;
-            }
-
-            setStatus('connecting', '连接中...');
-
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const host = window.location.host;
-            // 构建WebSocket URL（仅传递必要的参数）
-            let wsUrl = `${protocol}//${host}/ws/chat?token=${encodeURIComponent(state.token)}`;
-
-            // 传递 session_id（如果存在）
-            if (state.sessionId) {
-                wsUrl += `&session_id=${encodeURIComponent(state.sessionId)}`;
-            }
-
-            // 传递URL中的商品参数到WebSocket
-            if (state.urlSkuId) {
-                wsUrl += `&sku_id=${encodeURIComponent(state.urlSkuId)}`;
-            }
-            if (state.urlSpuId) {
-                wsUrl += `&spu_id=${encodeURIComponent(state.urlSpuId)}`;
-            }
-
-            console.log('Connecting to WebSocket:', wsUrl);
-            state.ws = new WebSocket(wsUrl);
-            
-            state.ws.onopen = () => {
-                console.log('WebSocket connected');
-                state.retryCount = 0;
-                state.connectedAt = Date.now();
-                setStatus('connected');
-                updateActivity();
-                startHeartbeat();
-            };
-            
-            state.ws.onclose = (event) => {
-                console.log('WebSocket disconnected', event.code, event.reason);
-                stopHeartbeat();
-                
-                // 1000 是正常关闭，不需要重连
-                if (event.code === 1000) {
-                    setStatus('disconnected', '已断开');
-                    return;
-                }
-                
-                setStatus('reconnecting');
-                scheduleReconnect();
-            };
-            
-            state.ws.onerror = (err) => {
-                console.error('WebSocket error:', err);
-                setStatus('error', '连接错误');
-            };
-            
-            state.ws.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    handleMessage(data);
-                } catch (e) {
-                    console.error('Failed to parse message:', e);
-                }
-            };
-        }
-        
-        function sendMessage() {
-            const message = dom.messageInput.value.trim();
-            if (!message) return;
-            
-            if (state.status !== 'connected') {
-                showToast('WebSocket 未连接', 'error');
-                return;
-            }
-            
-            dom.messageInput.value = '';
-            dom.sendBtn.disabled = true;
-            
-            // 添加用户消息
-            addMessage('user', message);
-            state.msgSent++;
-            updateStats();
-            
-            // 添加助手占位
-            state.currentPlaceholder = addMessage('assistant', '正在思考中...', true);
-            state.accumulatedResponse = '';
-            
-            // 发送消息
+    function handleServerPing(data) {
+        if (state.ws && state.ws.readyState === WebSocket.OPEN) {
             state.ws.send(JSON.stringify({
-                type: 'message',
-                content: message,
-                session_id: state.sessionId || undefined
+                type: 'pong',
+                timestamp: data.timestamp || Date.now()
             }));
         }
-        
-        function addMessage(role, content, isPlaceholder = false) {
-            const div = document.createElement('div');
-            div.className = `message ${role}`;
-            div.innerHTML = `<div class="message-content">${content}</div>`;
-            dom.chatMessages.appendChild(div);
-            dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
-            
-            if (!isPlaceholder) {
-                updateActivity();
+    }
+
+    function handlePong(data) {
+        state.pongCount++;
+        state.lastPongTime = Date.now();
+        clearTimeout(state.pongTimer);
+        updateStats();
+    }
+
+    function escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
+    }
+
+    // ==================== 心跳 ====================
+    function startHeartbeat() {
+        stopHeartbeat();
+
+        // 主心跳定时器 - 发送 Ping 并等待 Pong
+        state.heartbeatTimer = setInterval(() => {
+            if (state.ws && state.ws.readyState === WebSocket.OPEN) {
+                state.ws.send(JSON.stringify({
+                    type: 'ping',
+                    timestamp: Date.now()
+                }));
+                state.pingCount++;
+                state.lastPingTime = Date.now();
+                updateStats();
+
+                // 设置 Pong 超时 - 如果超过指定时间没收到响应，认为连接可能已断开
+                state.pongTimer = setTimeout(() => {
+                    console.error('[WS] Pong timeout - connection may be dead');
+                    setStatus('error', '心跳超时');
+                    state.ws.close();
+                }, API_CONFIG.TIMEOUT);
             }
-            
-            return div;
+        }, API_CONFIG.TIMEOUT);
+
+        // 在线时长定时器 - 每秒更新显示
+        state.uptimeTimer = setInterval(updateUptime, 1000);
+    }
+
+    function stopHeartbeat() {
+        if (state.heartbeatTimer) {
+            clearInterval(state.heartbeatTimer);
+            state.heartbeatTimer = null;
         }
-        
-        function askQuestion(question) {
-            dom.messageInput.value = question;
-            sendMessage();
+        if (state.pongTimer) {
+            clearTimeout(state.pongTimer);
+            state.pongTimer = null;
         }
-        
-        function undoLastMessage() {
-            if (state.status !== 'connected') {
-                showToast('WebSocket 未连接', 'error');
+        if (state.uptimeTimer) {
+            clearInterval(state.uptimeTimer);
+            state.uptimeTimer = null;
+        }
+    }
+
+    // ==================== 重连 - 指数退避策略 ====================
+    /**
+     * scheduleReconnect - 使用指数退避算法安排重连
+     *
+     * 重试延迟计算公式：min(baseDelay * 2^retryCount, maxDelay)
+     * 例如：1s -> 2s -> 4s -> 8s -> ... -> 30s (上限)
+     */
+    function scheduleReconnect() {
+        if (state.retryCount >= API_CONFIG.RETRY_CONFIG.maxRetries) {
+            setStatus('error', '连接失败');
+            showToast(`连接失败，已达到最大重试次数 (${API_CONFIG.RETRY_CONFIG.maxRetries})`, 'error');
+            return;
+        }
+
+        // 指数退避计算
+        const baseDelay = 1000;
+        const maxDelay = 30000;
+        const delay = Math.min(baseDelay * Math.pow(2, state.retryCount), maxDelay);
+
+        setStatus('reconnecting', `重连中 (${state.retryCount + 1}/${API_CONFIG.RETRY_CONFIG.maxRetries})...`);
+
+        state.reconnectTimer = setTimeout(() => {
+            state.retryCount++;
+            connectWebSocket();
+        }, delay);
+    }
+
+    // ==================== WebSocket ====================
+    async function init() {
+        setStatus('connecting', '获取认证...');
+
+        // 解析URL参数（支持 ?sku_id=xxx 或 ?spu_id=xxx）
+        parseUrlParams();
+
+        // 获取认证 Token
+        const authResult = await apiFetch(API_CONFIG.ENDPOINTS.AUTH_TOKEN, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: state.userId, role: 'user' })
+        });
+
+        if (!authResult.ok || !authResult.data.token) {
+            setAuthStatus(false, '认证失败');
+            showToast('认证失败: ' + (authResult.error || '未返回token'), 'error');
+            return;
+        }
+
+        state.token = authResult.data.token;
+        setAuthStatus(true, '已认证');
+        console.debug('[Auth] Token acquired:', state.token.substring(0, 30) + '...');
+
+        connectWebSocket();
+    }
+
+    function connectWebSocket() {
+        if (state.ws) {
+            state.ws.close();
+            state.ws = null;
+        }
+
+        if (!state.token) {
+            setStatus('error', '未获取到认证令牌');
+            showToast('请先获取认证令牌', 'error');
+            return;
+        }
+
+        setStatus('connecting', '连接中...');
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const host = window.location.host;
+
+        // 构建 WebSocket URL
+        let wsUrl = `${protocol}//${host}${API_CONFIG.ENDPOINTS.WS_CHAT}?token=${encodeURIComponent(state.token)}`;
+
+        if (state.sessionId) {
+            wsUrl += `&session_id=${encodeURIComponent(state.sessionId)}`;
+        }
+        if (state.urlSkuId) {
+            wsUrl += `&sku_id=${state.urlSkuId}`;
+        }
+        if (state.urlSpuId) {
+            wsUrl += `&spu_id=${state.urlSpuId}`;
+        }
+
+        console.debug('[WS] Connecting:', wsUrl);
+
+        // 记录 WebSocket 连接请求
+        RequestLogger.add({
+            id: 'ws_conn_' + Date.now(),
+            method: 'WS',
+            url: wsUrl,
+            type: 'ws_send',
+            status: 0
+        });
+
+        state.ws = new WebSocket(wsUrl);
+
+        state.ws.onopen = () => {
+            console.debug('[WS] Connected');
+            state.retryCount = 0;
+            state.connectedAt = Date.now();
+            setStatus('connected');
+            updateActivity();
+            startHeartbeat();
+
+            // 记录连接成功
+            RequestLogger.add({
+                id: 'ws_connected_' + Date.now(),
+                method: 'WS',
+                url: wsUrl,
+                type: 'ws_recv',
+                status: 200,
+                response: { body: { type: 'connected' } }
+            });
+        };
+
+        state.ws.onclose = (event) => {
+            console.debug('[WS] Disconnected:', event.code, event.reason);
+            stopHeartbeat();
+
+            if (event.code === 1000) {
+                setStatus('disconnected', '已断开');
                 return;
             }
-            state.ws.send(JSON.stringify({ type: 'delete', message_id: 0 }));
-            showToast('撤回请求已发送');
-        }
-        
-        // ==================== 事件绑定 ====================
-        dom.messageInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
-                e.preventDefault();
-                sendMessage();
+
+            setStatus('reconnecting');
+            scheduleReconnect();
+        };
+
+        state.ws.onerror = (err) => {
+            console.error('[WS] Error:', err);
+            setStatus('error', '连接错误');
+
+            RequestLogger.add({
+                id: 'ws_error_' + Date.now(),
+                method: 'WS',
+                url: wsUrl,
+                type: 'error',
+                status: 0,
+                error: 'WebSocket connection error'
+            });
+        };
+
+        state.ws.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                handleMessage(data);
+            } catch (e) {
+                console.error('[WS] Failed to parse message:', e);
             }
+        };
+    }
+
+    function sendMessage() {
+        const message = dom.messageInput.value.trim();
+        if (!message) return;
+
+        if (state.status !== 'connected') {
+            showToast('WebSocket 未连接', 'error');
+            return;
+        }
+
+        dom.messageInput.value = '';
+        dom.sendBtn.disabled = true;
+
+        // 添加用户消息
+        addMessage('user', message);
+        state.msgSent++;
+        updateStats();
+
+        // 添加助手占位
+        state.currentPlaceholder = addMessage('assistant', '正在思考中...', true);
+        state.accumulatedResponse = '';
+
+        // 记录发送的消息
+        RequestLogger.add({
+            id: 'ws_send_' + Date.now(),
+            method: 'WS',
+            url: '/ws/chat',
+            type: 'ws_send',
+            status: 200,
+            request: { body: { type: 'message', content: message } }
         });
-        
-        window.addEventListener('beforeunload', () => {
-            stopHeartbeat();
-            if (state.ws) state.ws.close();
-        });
-        
-        // ==================== 启动 ====================
-        document.addEventListener('DOMContentLoaded', init);
-    </script>
+
+        // 发送消息
+        state.ws.send(JSON.stringify({
+            type: 'chat',
+            content: message,
+            session_id: state.sessionId || undefined,
+            user_id: state.userId
+        }));
+    }
+
+    function addMessage(role, content, isPlaceholder = false) {
+        const div = document.createElement('div');
+        div.className = `message ${role}`;
+        div.innerHTML = `<div class="message-content">${content}</div>`;
+        dom.chatMessages.appendChild(div);
+        dom.chatMessages.scrollTop = dom.chatMessages.scrollHeight;
+
+        if (!isPlaceholder) {
+            updateActivity();
+        }
+
+        return div;
+    }
+
+    function askQuestion(question, element) {
+        // 取消之前的高亮
+        if (state.quickQuestionActive) {
+            state.quickQuestionActive.classList.remove('active');
+        }
+
+        // 高亮当前按钮
+        if (element) {
+            element.classList.add('active');
+            state.quickQuestionActive = element;
+        }
+
+        dom.messageInput.value = question;
+        sendMessage();
+    }
+
+    function undoLastMessage() {
+        if (state.status !== 'connected') {
+            showToast('WebSocket 未连接', 'error');
+            return;
+        }
+        state.ws.send(JSON.stringify({ type: 'delete', message_id: 0 }));
+        showToast('撤回请求已发送');
+    }
+
+    // ==================== 商品上下文 ====================
+    function parseUrlParams() {
+        const params = new URLSearchParams(window.location.search);
+        state.urlSkuId = params.get('sku_id') ? parseInt(params.get('sku_id')) : null;
+        state.urlSpuId = params.get('spu_id') ? parseInt(params.get('spu_id')) : null;
+
+        if (state.urlSkuId || state.urlSpuId) {
+            console.debug('[Product] URL params:', { sku_id: state.urlSkuId, spu_id: state.urlSpuId });
+        }
+    }
+
+    // ==================== 事件绑定 ====================
+    dom.messageInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    });
+
+    window.addEventListener('beforeunload', () => {
+        stopHeartbeat();
+        if (state.ws) state.ws.close();
+    });
+
+    // ==================== 启动 ====================
+    document.addEventListener('DOMContentLoaded', init);
+
+    // ==================== 暴露全局函数 ====================
+    window.toggleDebugPanel = toggleDebugPanel;
+    window.clearDebugLog = clearDebugLog;
+    window.askQuestion = askQuestion;
+    window.RequestLogger = RequestLogger;
+
+})();
+</script>
 </body>
 </html>

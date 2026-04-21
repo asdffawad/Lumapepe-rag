@@ -394,6 +394,7 @@ class RAGOrchestrator:
         self, intent: str, params: dict, request_id: str | None
     ) -> "ToolResult | None":
         """根据意图调用对应的工具，带超时和熔断器保护"""
+        import re
         from app.services.tool_router import ToolRouter
         from app.services.tools.base import ToolResult
 
@@ -418,8 +419,7 @@ class RAGOrchestrator:
         if intent == "product_query":
             # 商品查询不需要user_id
             # 尝试从查询中提取商品相关信息
-            import re
-            
+
             # 1. 提取条形码（通常是数字，长度8-20位）
             barcode_match = re.search(r'条形码[：:]\s*(\d{8,20})', query)
             if not barcode_match:

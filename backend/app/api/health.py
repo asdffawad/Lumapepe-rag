@@ -45,22 +45,17 @@ async def _check_redis() -> dict:
         return {"status": "down", "latency_ms": 0, "error": str(e)}
 
 
-async def _check_milvus() -> dict:
-    """检查 Milvus 连接"""
+async def _check_qdrant() -> dict:
+    """检查 Qdrant 连接"""
     try:
         from app.main import app as _app
-        if hasattr(_app.state, "orchestrator"):
-            orch = _app.state.orchestrator
-            if hasattr(orch, "_retriever"):
-                retriever = orch._retriever
-                if hasattr(retriever, "_milvus"):
-                    milvus = retriever._milvus
-                    if hasattr(milvus, "health_check"):
-                        result = milvus.health_check()
-                        if result:
-                            # num_entities is async now; use 0 as approximate count in health check
-                            return {"status": "up", "entities": 0}
-                        return {"status": "degraded", "entities": 0}
+        if hasattr(_app.state, "milvus_client"):
+            client = _app.state.milvus_client
+            if hasattr(client, "health_check"):
+                result = await client.health_check()
+                if result:
+                    return {"status": "up", "entities": 0}
+                return {"status": "degraded", "entities": 0}
         return {"status": "degraded", "entities": 0, "reason": "using_mock_retriever"}
     except Exception as e:
         return {"status": "down", "error": str(e)}
@@ -98,13 +93,13 @@ async def health_check_detailed():
     """
     mysql = await _check_mysql()
     redis = await _check_redis()
-    milvus = await _check_milvus()
+    qdrant = await _check_qdrant()
     llm = await _check_llm()
 
     components = {
         "mysql": mysql,
         "redis": redis,
-        "milvus": milvus,
+        "qdrant": qdrant,
         "llm": llm,
     }
 

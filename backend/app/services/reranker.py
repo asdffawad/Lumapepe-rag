@@ -1,5 +1,5 @@
 """
-Reranker module（企业级）
+Reranker module
 - MMR (Maximal Marginal Relevance) 重排
 - 业务规则加权（新品、促销等）
 - 意图关键词匹配加权
@@ -145,7 +145,7 @@ class Reranker(ABC):
 # ---------------------------------------------------------------------------
 class MMRReranker(Reranker):
     """
-    MMR (Maximal Marginal Relevance) Reranker（企业级）
+    MMR (Maximal Marginal Relevance) Reranker
 
     改进点：
     - 可配置 λ 参数
@@ -427,7 +427,7 @@ class MMRReranker(Reranker):
             )
 
             llm_scores = []
-            for i, (score, doc), response in enumerate(zip(candidates, responses)):
+            for i, ((score, doc), response) in enumerate(zip(candidates, responses)):
                 if isinstance(response, Exception):
                     _rerank_logger.warning(
                         f"LLM rerank failed for doc {i}",

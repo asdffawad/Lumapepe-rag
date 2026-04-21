@@ -18,8 +18,83 @@ from typing import Callable
 from fastapi import Request, HTTPException, status
 from starlette.middleware.base import BaseHTTPMiddleware
 
-# 预计算的 JWT secret（通过环境变量覆盖）
-_JWT_SECRET = os.getenv("JWT_SECRET", "dev-secret-change-in-production")
+# JWT Secret 验证
+_JWT_SECRET = os.getenv("JWT_SECRET", "")
+
+# 开发模式标志（设置 DEBUG=true 时允许使用弱密钥）
+_IS_DEBUG = os.getenv("DEBUG", "").lower() in ("true", "1", "yes")
+
+# 不安全的默认密钥列表
+_UNSAFE_SECRETS = {
+    "dev-secret-change-in-production",
+    "changeme",
+    "secret",
+    "password",
+    "your-secret-here",
+    "",
+}
+
+
+def _validate_jwt_secret() -> str:
+    """
+    验证 JWT_SECRET 配置。
+
+    生产模式：必须设置 >= 32 字符的安全密钥
+    开发模式：允许使用默认值但输出警告
+    """
+    secret = os.getenv("JWT_SECRET", "")
+
+    if not secret:
+        if _IS_DEBUG:
+            import warnings
+            warnings.warn(
+                "[WARNING] JWT_SECRET is not set. Using insecure default key for development only. "
+                "DO NOT use in production. Generate with: openssl rand -hex 32",
+                UserWarning,
+                stacklevel=2,
+            )
+            return "dev-insecure-key-do-not-use-in-production"
+        else:
+            raise ValueError(
+                "JWT_SECRET must be set in production environment. "
+                "Generate with: openssl rand -hex 32"
+            )
+
+    if secret in _UNSAFE_SECRETS:
+        if _IS_DEBUG:
+            import warnings
+            warnings.warn(
+                f"[WARNING] JWT_SECRET uses insecure value '{secret}'. "
+                "DO NOT use in production. Generate with: openssl rand -hex 32",
+                UserWarning,
+                stacklevel=2,
+            )
+        else:
+            raise ValueError(
+                f"JWT_SECRET uses insecure value '{secret}'. "
+                "Generate with: openssl rand -hex 32"
+            )
+
+    if len(secret) < 32:
+        if _IS_DEBUG:
+            import warnings
+            warnings.warn(
+                f"[WARNING] JWT_SECRET length ({len(secret)}) is less than 32 characters. "
+                "This is insecure for production. Generate with: openssl rand -hex 32",
+                UserWarning,
+                stacklevel=2,
+            )
+        else:
+            raise ValueError(
+                f"JWT_SECRET length ({len(secret)}) must be at least 32 characters. "
+                "Generate with: openssl rand -hex 32"
+            )
+
+    return secret
+
+
+# 初始化时验证
+_JWT_SECRET = _validate_jwt_secret()
 _JWT_ALGORITHM = "HS256"
 
 
@@ -139,6 +214,54 @@ def verify_api_key(api_key: str) -> AuthUser | None:
     return None
 
 
+def verify_admin_key(api_key: str) -> bool:
+    """
+    验证管理员 API Key
+
+    环境变量 ADMIN_API_KEYS 格式: key_id:secret,key_id2:secret2
+
+    Returns:
+        True 如果验证通过，否则 False
+    """
+    if not api_key:
+        return False
+
+    allowed_keys = os.getenv("ADMIN_API_KEYS", "")
+    if not allowed_keys:
+        # 开发模式允许使用默认密钥（带警告）
+        if _IS_DEBUG:
+            import warnings
+            warnings.warn(
+                "[WARNING] ADMIN_API_KEYS is not set. Admin endpoints are unprotected in development mode. "
+                "Set ADMIN_API_KEYS in production.",
+                UserWarning,
+                stacklevel=2,
+            )
+            return True
+        return False
+
+    for entry in allowed_keys.split(","):
+        parts = entry.strip().split(":")
+        if len(parts) < 2:
+            continue
+        key_id, secret = parts[0], parts[1]
+        expected = f"{key_id}:{secret}"
+        if hmac.compare_digest(api_key, expected):
+            return True
+
+    return False
+
+
+def _extract_admin_key(request: Request) -> str | None:
+    """从请求中提取管理员 API Key"""
+    # 支持多种 Header 名称
+    return (
+        request.headers.get("X-Admin-Key")
+        or request.headers.get("x-admin-key")
+        or request.headers.get("X-AdminKey")
+    )
+
+
 def _extract_bearer_token(request: Request) -> str | None:
     auth = request.headers.get("Authorization", "")
     if auth.startswith("Bearer "):
@@ -167,14 +290,35 @@ async def get_current_user(request: Request) -> AuthUser:
     if request.url.path in skip_paths or request.url.path.startswith("/docs"):
         return AuthUser(user_id="anonymous", role="guest")
 
-    # 跳过认证的路径（精确匹配）
-    skip_exact = {
-        "/api/v1/health",
+    # 管理员端点检查
+    admin_paths = {
         "/api/v1/admin/ingest",
         "/api/v1/admin/documents",
     }
-    if request.url.path in skip_exact:
-        return AuthUser(user_id="admin", role="admin")
+    if request.url.path in admin_paths:
+        # 检查管理员认证
+        admin_key = _extract_admin_key(request)
+        if admin_key and verify_admin_key(admin_key):
+            return AuthUser(user_id="admin", role="admin")
+
+        # 检查 JWT 是否具有 admin 角色
+        token = _extract_bearer_token(request)
+        if token:
+            try:
+                user = decode_token(token)
+                if user.role == "admin":
+                    return user
+            except JWTError:
+                pass
+
+        # 管理员端点无认证
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={
+                "code": "ADMIN_REQUIRED",
+                "message": "管理员权限认证失败，请提供有效的 X-Admin-Key 或使用 admin 角色的 JWT"
+            },
+        )
 
     # 1. 尝试 JWT
     token = _extract_bearer_token(request)

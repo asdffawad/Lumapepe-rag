@@ -1,5 +1,6 @@
 fastapi==0.115.0
 uvicorn[standard]==0.30.6
+gunicorn==22.0.0
 pydantic==2.9.2
 pydantic-settings==2.5.2
 pymilvus==2.4.8
@@ -29,3 +30,4 @@ tiktoken>=0.7.0        # Precise token counting (falls back to char-based if not
 jieba>=0.42.1          # Chinese word segmentation (falls back to char-level if not installed)
 rank-bm25>=0.2.0       # BM25 sparse retrieval for hybrid search
 rapidfuzz>=3.0.0       # Fast fuzzy string matching for product resolver
+qdrant-client>=1.12.0  # Qdrant vector DB (preferred over raw HTTP)

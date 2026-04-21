@@ -81,19 +81,38 @@ async def lifespan(app: FastAPI):
     # 初始化 LLM
     llm = LLMFactory.create(config.llm.provider, config.llm)
 
-    # 初始化 Milvus 连接（不依赖 LLM provider，供 admin API 使用）
-    milvus_client = None
-    try:
-        milvus_client = MilvusClient(config.milvus)
-        await milvus_client.connect()
-        app.state.milvus_client = milvus_client
-        logger.info("Milvus connected", extra={"host": config.milvus.host, "port": config.milvus.port})
-    except Exception as e:
-        import traceback as _tb
-        logger.warning(
-            "Milvus connection failed, admin API will be unavailable. "
-            f"error={type(e).__name__}: {e}"
-        )
+    # 初始化向量数据库（Milvus 或 Qdrant）
+    vector_client = None
+    vector_type = None
+
+    # 优先尝试 Qdrant（如果启用）
+    if config.qdrant.enabled:
+        try:
+            from app.vectorstore.qdrant_adapter import QdrantClient
+            qdrant_client = QdrantClient(config.qdrant)
+            await qdrant_client.connect()
+            vector_client = qdrant_client
+            vector_type = "qdrant"
+            app.state.milvus_client = qdrant_client  # 保持兼容
+            logger.info("Qdrant connected", extra={"host": config.qdrant.host, "port": config.qdrant.port})
+        except Exception as e:
+            import traceback as _tb
+            logger.warning(f"Qdrant connection failed: {type(e).__name__}: {e}")
+
+    # 尝试 Milvus（如果 Qdrant 未启用或连接失败）
+    if vector_client is None:
+        try:
+            milvus_client = MilvusClient(config.milvus)
+            await milvus_client.connect()
+            vector_client = milvus_client
+            vector_type = "milvus"
+            app.state.milvus_client = milvus_client
+            logger.info("Milvus connected", extra={"host": config.milvus.host, "port": config.milvus.port})
+        except Exception as e:
+            import traceback as _tb
+            logger.warning(
+                f"Milvus connection failed: {type(e).__name__}: {e}"
+            )
 
     # 初始化 RAG 子模块（优先用 Mock，方便本地测试）
     if config.llm.provider == "mock":
@@ -105,8 +124,8 @@ async def lifespan(app: FastAPI):
     else:
         # 启用 LLM 增强改写（query_rewriter 会自动判断场景是否需要）
         rewriter = EcommerceQueryRewriter(llm, use_llm_rewrite=True)
-        if milvus_client is not None:
-            retriever = SimpleVectorRetriever(milvus_client)
+        if vector_client is not None:
+            retriever = SimpleVectorRetriever(vector_client)
         else:
             retriever = MockVectorRetriever()
         reranker = MMRReranker(llm)
@@ -173,10 +192,7 @@ async def lifespan(app: FastAPI):
     # 检查是否需要自动知识库摄取
     if config.ingest.auto_ingest:
         try:
-            if milvus_client is None:
-                milvus_client = MilvusClient(config.milvus)
-                await milvus_client.connect()
-            entity_count = await milvus_client.num_entities()
+            entity_count = await vector_client.num_entities()
             if entity_count == 0:
                 logger.info("Knowledge base is empty, triggering auto-ingestion...")
                 # 延迟导入避免循环依赖
@@ -262,13 +278,19 @@ def create_app() -> FastAPI:
     cors_origins = config.cors_origins
     allow_creds = True
     if "*" in cors_origins:
-        import warnings
-        warnings.warn(
-            "CORS 配置不安全：allow_origins=['*'] + allow_credentials=True 会导致浏览器拒绝请求。"
-            "生产环境请设置具体的 CORS_ORIGINS 域名列表。",
-            UserWarning,
-        )
-        allow_creds = False
+        if config.debug:
+            import warnings
+            warnings.warn(
+                "[WARNING] CORS 配置不安全：allow_origins=['*'] + allow_credentials=True 会导致浏览器拒绝请求。"
+                "生产环境请设置具体的 CORS_ORIGINS 域名列表。",
+                UserWarning,
+            )
+            allow_creds = False
+        else:
+            raise ValueError(
+                "CORS 配置不安全：生产环境禁止使用 allow_origins=['*']。"
+                "请通过环境变量 CORS_ORIGINS 设置具体的域名列表，格式：https://example.com,https://app.example.com"
+            )
     app.add_middleware(
         CORSMiddleware,
         allow_origins=cors_origins,

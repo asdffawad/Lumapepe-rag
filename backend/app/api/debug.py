@@ -336,17 +336,15 @@ async def debug_retrieve(request: RetrieveRequest):
 
     config = get_config()
 
-    # 构建过滤器（兼容两种过滤方式）
-    filters = None
-    filter_exprs: list[str] = []
+    # 构建过滤器（Qdrant 兼容格式）
+    filter_conditions = []
     if request.lang_filter:
-        lang_parts = [f'(lang like "%{lang}%")' for lang in request.lang_filter]
-        filter_exprs.append("(" + " or ".join(lang_parts) + ")")
+        for lang in request.lang_filter:
+            filter_conditions.append({"key": "lang", "match": {"value": lang}})
     if request.section_type_filter:
-        st_parts = [f'(section_type like "%{st}%")' for st in request.section_type_filter]
-        filter_exprs.append("(" + " or ".join(st_parts) + ")")
-    if filter_exprs:
-        filters = {"expr": " and ".join(filter_exprs)}
+        for st in request.section_type_filter:
+            filter_conditions.append({"key": "section_type", "match": {"value": st}})
+    filters = {"must": filter_conditions} if filter_conditions else None
 
     # 初始化 retrievers
     simple_retriever = SimpleVectorRetriever(milvus_client)

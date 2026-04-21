@@ -21,6 +21,9 @@ class LLMConfig:
     max_retries: int = 3
     default_temperature: float = 0.7
     default_max_tokens: int = 2048
+    # Token 限制（安全限制）
+    max_input_tokens: int = 4096
+    max_output_tokens: int = 2048
 
 
 @dataclass
@@ -31,12 +34,18 @@ class DBConfig:
     password: str = ""
     database: str = "rag_customer_service"
     pool_size: int = 10
+    max_overflow: int = 20
+    pool_recycle: int = 3600
+    pool_timeout: int = 30
 
 
 @dataclass
 class RedisConfig:
     url: str = "redis://localhost:6379"
     db: int = 0
+    pool_size: int = 10
+    socket_timeout: int = 5
+    socket_connect_timeout: int = 5
 
 
 @dataclass
@@ -45,6 +54,20 @@ class MilvusConfig:
     port: int = 19530
     collection_name: str = "knowledge_base"
     entity_count_hint: int = 1_000_000  # 启动时估计向量数量，<100万用 HNSW，否则用 IVF_FLAT
+
+
+@dataclass
+class QdrantConfig:
+    """Qdrant 向量数据库配置"""
+    host: str = "localhost"
+    port: int = 6333
+    collection_name: str = "knowledge_base"
+    timeout: int = 30
+    enabled: bool = False  # 是否启用 Qdrant（替代 Milvus）
+    prefer_grpc: bool = True      # gRPC 默认更快
+    vector_dim: int = 1024       # embedding 向量维度
+    distance: str = "Cosine"      # "Cosine" | "Dot" | "Euclid"
+    grpc_port: int = 6334         # gRPC 端口（默认 6334）
 
 
 @dataclass
@@ -83,10 +106,11 @@ class WebSocketConfig:
     max_global: int = 10000         # 全局最大连接数
     heartbeat_interval: int = 30    # 心跳间隔（秒）
     heartbeat_timeout: int = 60     # 心跳超时（秒）
+    ping_timeout: int = 5           # ping 响应超时（秒）
     rate_limit_per_user: int = 30   # 用户消息限流（条/分钟）
     rate_limit_per_conn: int = 20   # 连接消息限流（条/分钟）
     rate_limit_window: int = 60     # 限流窗口（秒）
-    max_message_size: int = 65536   # 单条消息最大字节数（64KB）
+    max_message_size: int = 1048576  # 单条消息最大字节数（1MB）
 
 
 @dataclass
@@ -114,6 +138,7 @@ class AppConfig:
     db: DBConfig = field(default_factory=DBConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
     milvus: MilvusConfig = field(default_factory=MilvusConfig)
+    qdrant: QdrantConfig = field(default_factory=QdrantConfig)
     celery: CeleryConfig = field(default_factory=CeleryConfig)
     rag: RAGConfig = field(default_factory=RAGConfig)
     rate_limit: RateLimitConfig = field(default_factory=RateLimitConfig)
@@ -143,6 +168,8 @@ def get_config() -> AppConfig:
             max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
             default_temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
             default_max_tokens=int(os.getenv("LLM_MAX_TOKENS", "2048")),
+            max_input_tokens=int(os.getenv("LLM_MAX_INPUT_TOKENS", "4096")),
+            max_output_tokens=int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "2048")),
         ),
         db=DBConfig(
             host=os.getenv("MYSQL_HOST", "localhost"),
@@ -151,16 +178,33 @@ def get_config() -> AppConfig:
             password=os.getenv("MYSQL_PASSWORD", ""),
             database=os.getenv("MYSQL_DATABASE", "rag_customer_service"),
             pool_size=int(os.getenv("MYSQL_POOL_SIZE", "10")),
+            max_overflow=int(os.getenv("MYSQL_MAX_OVERFLOW", "20")),
+            pool_recycle=int(os.getenv("MYSQL_POOL_RECYCLE", "3600")),
+            pool_timeout=int(os.getenv("MYSQL_POOL_TIMEOUT", "30")),
         ),
         redis=RedisConfig(
             url=os.getenv("REDIS_URL", "redis://localhost:6379"),
             db=int(os.getenv("REDIS_DB", "0")),
+            pool_size=int(os.getenv("REDIS_POOL_SIZE", "10")),
+            socket_timeout=int(os.getenv("REDIS_SOCKET_TIMEOUT", "5")),
+            socket_connect_timeout=int(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", "5")),
         ),
         milvus=MilvusConfig(
-            host=os.getenv("MILVUS_HOST", "localhost"),
-            port=int(os.getenv("MILVUS_PORT", "19530")),
+            host=os.getenv("MILVUS_HOST", "localhost") or "localhost",
+            port=int(os.getenv("MILVUS_PORT") or "19530"),
             collection_name=os.getenv("MILVUS_COLLECTION", "knowledge_base"),
             entity_count_hint=int(os.getenv("MILVUS_ENTITY_COUNT_HINT", "1000000")),
+        ),
+        qdrant=QdrantConfig(
+            host=os.getenv("QDRANT_HOST", "localhost") or "localhost",
+            port=int(os.getenv("QDRANT_PORT") or "6333"),
+            collection_name=os.getenv("QDRANT_COLLECTION", "knowledge_base"),
+            timeout=int(os.getenv("QDRANT_TIMEOUT") or "30"),
+            enabled=_str_to_bool(os.getenv("QDRANT_ENABLED", "false")),
+            prefer_grpc=_str_to_bool(os.getenv("QDRANT_PREFER_GRPC", "true")),
+            vector_dim=int(os.getenv("QDRANT_VECTOR_DIM", "1024")),
+            distance=os.getenv("QDRANT_DISTANCE", "Cosine"),
+            grpc_port=int(os.getenv("QDRANT_GRPC_PORT") or "6334"),
         ),
         celery=CeleryConfig(
             broker_url=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1"),
@@ -185,10 +229,11 @@ def get_config() -> AppConfig:
             max_global=int(os.getenv("WS_MAX_GLOBAL", "10000")),
             heartbeat_interval=int(os.getenv("WS_HEARTBEAT_INTERVAL", "30")),
             heartbeat_timeout=int(os.getenv("WS_HEARTBEAT_TIMEOUT", "60")),
+            ping_timeout=int(os.getenv("WS_PING_TIMEOUT", "5")),
             rate_limit_per_user=int(os.getenv("WS_RATE_LIMIT_PER_USER", "30")),
             rate_limit_per_conn=int(os.getenv("WS_RATE_LIMIT_PER_CONN", "20")),
             rate_limit_window=int(os.getenv("WS_RATE_LIMIT_WINDOW", "60")),
-            max_message_size=int(os.getenv("WS_MAX_MESSAGE_SIZE", "65536")),
+            max_message_size=int(os.getenv("WS_MAX_MESSAGE_SIZE", "1048576")),
         ),
         ingest=IngestConfig(
             auto_ingest=_str_to_bool(os.getenv("AUTO_INGEST", "false")),

@@ -1,0 +1,58 @@
+# ==============================================================================
+# Docker 构建忽略文件
+# ==============================================================================
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Git
+.git/
+.gitignore
+.gitattributes
+
+# 测试
+tests/
+*.test.py
+pytest.ini
+
+# 文档
+*.md
+docs/
+
+# 环境
+.env
+.env.local
+.env.*.local
+
+# 日志
+*.log
+logs/
+
+# Docker
+Dockerfile
+docker-compose*.yml
+.docker/
+
+# 其他
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db

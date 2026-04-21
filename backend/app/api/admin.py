@@ -516,7 +516,6 @@ async def trigger_incremental_ingest(dry_run: bool = False, delete_missing: bool
     import asyncio
     from pathlib import Path
 
-    from pymilvus import Collection, connections, utility
 
     # 计算 data_dir（项目根目录下的 data/ 文件夹）
     data_dir = os.getenv("DATA_DIR", None)
@@ -532,9 +531,9 @@ async def trigger_incremental_ingest(dry_run: bool = False, delete_missing: bool
         "password": os.getenv("MYSQL_PASSWORD", ""),
         "database": os.getenv("MYSQL_DATABASE", "rag_customer_service"),
     }
-    milvus_config = {
-        "host": os.getenv("MILVUS_HOST", "localhost"),
-        "port": int(os.getenv("MILVUS_PORT", "19530")),
+    qdrant_config = {
+        "host": os.getenv("QDRANT_HOST", "localhost"),
+        "port": int(os.getenv("QDRANT_PORT", "6333") or "6333"),
     }
     ingest_config = {
         "data_dir": data_dir,
@@ -557,45 +556,20 @@ async def trigger_incremental_ingest(dry_run: bool = False, delete_missing: bool
         autocommit=True,
     )
 
-    alias = "default"
-    # pymilvus connections.connect 是同步的，在线程池中运行避免阻塞事件循环
-    await asyncio.to_thread(
-        connections.connect,
-        alias=alias,
-        host=milvus_config["host"],
-        port=milvus_config["port"],
-        channel_kwargs={"grpc.max_receive_message_length": 32*1024*1024}
+    # 创建 Qdrant 客户端
+    from app.vectorstore.qdrant_adapter import QdrantClient, QdrantConfig as QdrantConfigClass
+    qdrant_cfg = QdrantConfigClass(
+        host=qdrant_config["host"],
+        port=qdrant_config["port"],
+        collection_name="knowledge_base",
     )
-    # 确保 Milvus collection 已加载或创建
-    milvus_collection = None
-    if utility.has_collection("knowledge_base"):
-        milvus_collection = Collection("knowledge_base")
-        milvus_collection.load()
-    else:
-        # 创建 collection
-        from pymilvus import CollectionSchema, DataType, FieldSchema
-        fields = [
-            FieldSchema(name="id", dtype=DataType.VARCHAR, max_length=128, is_primary=True),
-            FieldSchema(name="vector", dtype=DataType.FLOAT_VECTOR, dim=1024),
-            FieldSchema(name="content", dtype=DataType.VARCHAR, max_length=4096),
-            FieldSchema(name="doc_id", dtype=DataType.INT64),
-            FieldSchema(name="chunk_index", dtype=DataType.INT64),
-            FieldSchema(name="source", dtype=DataType.VARCHAR, max_length=256),
-            FieldSchema(name="doc_type", dtype=DataType.VARCHAR, max_length=64),
-            FieldSchema(name="section_type", dtype=DataType.VARCHAR, max_length=32),
-            FieldSchema(name="markets", dtype=DataType.VARCHAR, max_length=128),
-            FieldSchema(name="lang", dtype=DataType.VARCHAR, max_length=8),
-            FieldSchema(name="hierarchy", dtype=DataType.VARCHAR, max_length=256),
-        ]
-        schema = CollectionSchema(fields=fields, description="RAG Knowledge Base - v2")
-        milvus_collection = Collection(name="knowledge_base", schema=schema)
-        milvus_collection.create_index(field_name="vector", index_params={"index_type": "HNSW", "metric_type": "IP", "params": {"M": 16, "efConstruction": 200}})
-        milvus_collection.load()
+    qdrant_client = QdrantClient(qdrant_cfg)
+    await qdrant_client.connect()
 
     try:
         from app.services.incremental_ingest_core import run_incremental_ingestion
         result = await run_incremental_ingestion(
-            pool, milvus_collection, ingest_config,
+            pool, qdrant_client, ingest_config,
             dry_run=dry_run, delete_missing=delete_missing
         )
 
@@ -614,7 +588,7 @@ async def trigger_incremental_ingest(dry_run: bool = False, delete_missing: bool
     finally:
         pool.close()
         await pool.wait_closed()
-        await asyncio.to_thread(connections.disconnect, alias=alias)
+        await qdrant_client.close()
 
 
 # ============ WebSocket 连接管理（调试工具）============

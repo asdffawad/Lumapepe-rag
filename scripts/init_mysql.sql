@@ -37,15 +37,19 @@ CREATE TABLE IF NOT EXISTS documents (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     doc_type ENUM('product','policy','faq','manual') NOT NULL,
     title VARCHAR(255) NOT NULL,
+    source_path VARCHAR(512) COMMENT '来源路径，用于增量摄取去重，如 products.json::SKU001',
     file_path VARCHAR(512),
     file_hash VARCHAR(64),
+    file_mtime DATETIME COMMENT '文件修改时间，用于判断是否需要更新',
     chunk_count INT,
     status ENUM('pending','processing','done','failed','deleted') DEFAULT 'pending',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    updated_at DATETIME ON UPDATE CURRENT_TIMESTAMP,
     indexed_at DATETIME,
     content_raw JSON COMMENT '原始文档内容，用于重索引',
     INDEX idx_doc_type (doc_type),
-    INDEX idx_status (status)
+    INDEX idx_status (status),
+    INDEX idx_source_path (source_path)
 );
 
 CREATE TABLE IF NOT EXISTS logs (

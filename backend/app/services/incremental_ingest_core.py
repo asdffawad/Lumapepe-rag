@@ -14,6 +14,7 @@ import json
 import os
 import sys
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Optional
 
@@ -78,7 +79,7 @@ def scan_data_directory(data_dir: Path) -> list[dict]:
                 product_id = item.get("product_id") or item.get("id") or ""
                 result.append({
                     "source_path": f"products.json::{product_id}",
-                    "mtime": mtime,
+                    "mtime": datetime.fromtimestamp(mtime),
                     "item": item,
                     "doc_type": "product",
                     "file_path": None,
@@ -94,7 +95,7 @@ def scan_data_directory(data_dir: Path) -> list[dict]:
         try:
             with open(kb_file, encoding="utf-8") as f:
                 kb_items = json.load(f)
-            mtime = os.path.getmtime(kb_file)
+            mtime = datetime.fromtimestamp(os.path.getmtime(kb_file))
             for item in kb_items:
                 item_id = item.get("id", "")
                 category = item.get("category", "")
@@ -125,7 +126,7 @@ def scan_data_directory(data_dir: Path) -> list[dict]:
         try:
             with open(orders_file, encoding="utf-8") as f:
                 orders = json.load(f)
-            mtime = os.path.getmtime(orders_file)
+            mtime = datetime.fromtimestamp(os.path.getmtime(orders_file))
             for item in orders:
                 order_id = item.get("order_id", "")
                 result.append({
@@ -145,7 +146,7 @@ def scan_data_directory(data_dir: Path) -> list[dict]:
     for ext in supported_exts:
         for file_path in data_path.rglob(f"*{ext}"):
             try:
-                mtime = os.path.getmtime(file_path)
+                mtime = datetime.fromtimestamp(os.path.getmtime(file_path))
                 # 计算相对于 data_dir 的路径作为 source_path
                 rel_path = file_path.relative_to(data_path)
                 result.append({
@@ -256,7 +257,7 @@ def _truncate_hierarchy(hierarchy: dict, max_key_len: int = 20, max_val_len: int
 
 async def run_incremental_ingestion(
     mysql_pool: Any,
-    milvus_collection: Any,
+    qdrant_client: Any,
     config: dict[str, Any],
     dry_run: bool = False,
     delete_missing: bool = False,
@@ -266,7 +267,7 @@ async def run_incremental_ingestion(
 
     Args:
         mysql_pool: aiomysql 连接池
-        milvus_collection: pymilvus Collection 对象（可为 None）
+        qdrant_client: QdrantClient 对象（可为 None）
         config: 配置字典，需包含:
             - data_dir: 数据目录路径
             - chunk_size: 分块大小
@@ -367,14 +368,13 @@ async def run_incremental_ingestion(
                         continue
 
                     # -------------------------------------------------------------------------
-                    # 3b. 删除旧 Milvus 向量（如果是更新）
+                    # 3b. 删除旧向量（如果是更新）
                     # -------------------------------------------------------------------------
-                    if milvus_collection is not None and action == "updated":
+                    if qdrant_client is not None and action == "updated":
                         try:
-                            milvus_collection.delete(expr=f"doc_id == {doc_id}")
-                            milvus_collection.flush()
+                            await qdrant_client.delete_by_doc_id(doc_id)
                         except Exception as e:
-                            print(f"[WARN] 删除 Milvus 向量失败 doc_id={doc_id}: {e}")
+                            print(f"[WARN] 删除向量失败 doc_id={doc_id}: {e}")
 
                     # -------------------------------------------------------------------------
                     # 3c. 分块
@@ -463,13 +463,12 @@ async def run_incremental_ingestion(
                         })
                         continue
 
-                    # 删除旧 Milvus 向量
-                    if milvus_collection is not None and action == "updated":
+                    # 删除旧向量
+                    if qdrant_client is not None and action == "updated":
                         try:
-                            milvus_collection.delete(expr=f"doc_id == {doc_id}")
-                            milvus_collection.flush()
+                            await qdrant_client.delete_by_doc_id(doc_id)
                         except Exception as e:
-                            print(f"[WARN] 删除 Milvus 向量失败 doc_id={doc_id}: {e}")
+                            print(f"[WARN] 删除向量失败 doc_id={doc_id}: {e}")
 
                     # 分块
                     markets = parsed.markets
@@ -530,30 +529,34 @@ async def run_incremental_ingestion(
                     vectors = await _embed_texts(batch_texts, config)
                     all_vectors.extend(vectors)
 
-                # 写入 Milvus
-                if milvus_collection is not None:
+                # 写入向量数据库
+                if qdrant_client is not None:
                     try:
-                        milvus_collection.insert([
-                            all_ids,
-                            all_vectors,
-                            all_contents,
-                            all_doc_ids,
-                            all_indices,
-                            all_sources,
-                            all_doc_types,
-                            all_section_types,
-                            all_markets,
-                            all_langs,
-                            all_hierarchies,
-                        ])
-                        milvus_collection.flush()
+                        # 准备 metadata
+                        all_metadata = []
+                        for i in range(len(chunks)):
+                            all_metadata.append({
+                                "section_type": all_section_types[i],
+                                "markets": json.loads(all_markets[i]) if all_markets[i] else ["CN"],
+                                "lang": all_langs[i],
+                                "hierarchy": json.loads(all_hierarchies[i]) if all_hierarchies[i] else {},
+                            })
+                        
+                        await qdrant_client.insert(
+                            vectors=all_vectors,
+                            contents=all_contents,
+                            metadata=all_metadata,
+                            doc_id=doc_id,
+                            doc_type=doc_type,
+                            source=source_path,
+                        )
                     except Exception as e:
                         await repo.mark_failed(doc_id)
                         result.errors += 1
                         result.details.append({
                             "source_path": source_path,
                             "action": "error",
-                            "message": f"Milvus 写入失败: {e}",
+                            "message": f"向量写入失败: {e}",
                         })
                         continue
 
@@ -582,13 +585,12 @@ async def run_incremental_ingestion(
 
                 for doc_id, path in db_records:
                     if path in missing_paths:
-                        # 删除 Milvus 向量
-                        if milvus_collection is not None:
+                        # 删除向量
+                        if qdrant_client is not None:
                             try:
-                                milvus_collection.delete(expr=f"doc_id == {doc_id}")
-                                milvus_collection.flush()
+                                await qdrant_client.delete_by_doc_id(doc_id)
                             except Exception as e:
-                                print(f"[WARN] 删除 Milvus 向量失败 doc_id={doc_id}: {e}")
+                                print(f"[WARN] 删除向量失败 doc_id={doc_id}: {e}")
 
                         # 硬删除 MySQL 记录
                         await repo.hard_delete(doc_id)
