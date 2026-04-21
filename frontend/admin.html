@@ -793,7 +793,10 @@ body {
         <span class="section-title">文档列表</span>
         <div style="display:flex;gap:8px">
           <button class="btn btn-ghost btn-sm" onclick="loadDocs()"><span class="spinner"></span> 刷新</button>
-          <button class="btn btn-violet btn-sm" onclick="openCreateDoc()">+ 新建文档</button>
+          <button class="btn btn-violet btn-sm" onclick="openUploadModal()">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+            上传文件
+          </button>
         </div>
       </div>
       <div class="card" style="padding:0;overflow:hidden">
@@ -1046,6 +1049,63 @@ body {
   </div>
 </div>
 
+<!-- Upload Modal -->
+<div id="upload-modal" style="display:none;position:fixed;inset:0;z-index:2000;background:rgba(26,22,37,0.5);backdrop-filter:blur(4px);align-items:center;justify-content:center">
+  <div style="background:var(--white);border-radius:18px;width:480px;max-width:95vw;box-shadow:0 8px 40px rgba(26,22,37,0.2);overflow:hidden">
+    <div style="padding:18px 24px;background:var(--ink);display:flex;align-items:center;justify-content:space-between">
+      <h3 style="color:white;font-size:15px;font-weight:700;margin:0">上传文档</h3>
+      <button onclick="closeUploadModal()" style="background:none;border:none;color:rgba(255,255,255,0.7);cursor:pointer;font-size:18px;padding:2px 6px;line-height:1">&#x2715;</button>
+    </div>
+    <div style="padding:24px">
+      <!-- Drop zone -->
+      <div id="drop-zone" style="border:2px dashed var(--paper-3);border-radius:12px;padding:36px 24px;text-align:center;cursor:pointer;transition:all 0.2s" onclick="document.getElementById('file-input').click()" ondragover="event.preventDefault();this.style.borderColor='var(--violet)';this.style.background='var(--violet-light)'" ondragleave="this.style.borderColor='';this.style.background=''" ondrop="handleFileDrop(event)">
+        <div id="drop-idle">
+          <svg width="36" height="36" viewBox="0 0 24 24" fill="none" stroke="var(--violet)" stroke-width="1.5" style="margin:0 auto 10px;display:block"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          <div style="font-size:14px;font-weight:600;color:var(--ink)">拖拽文件到这里，或点击选择</div>
+          <div style="font-size:12px;color:var(--ink-3);margin-top:4px">支持 PDF / DOCX / HTML</div>
+        </div>
+        <div id="drop-file" style="display:none">
+          <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="var(--emerald)" stroke-width="1.5" style="margin:0 auto 8px;display:block"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>
+          <div id="selected-file-name" style="font-size:14px;font-weight:600;color:var(--emerald)"></div>
+          <div id="selected-file-size" style="font-size:12px;color:var(--ink-3);margin-top:2px"></div>
+        </div>
+      </div>
+      <input type="file" id="file-input" accept=".pdf,.docx,.html,.htm" style="display:none" onchange="handleFileSelect(this)" />
+
+      <!-- Doc type selector -->
+      <div style="margin-top:16px">
+        <label style="font-size:12px;font-weight:600;color:var(--ink-3);display:block;margin-bottom:6px">文档类型</label>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <label style="cursor:pointer"><input type="radio" name="upload-doc-type" value="product" checked style="accent-color:var(--violet)" /> <span style="font-size:13px">商品</span></label>
+          <label style="cursor:pointer"><input type="radio" name="upload-doc-type" value="policy" style="accent-color:var(--violet)" /> <span style="font-size:13px">政策</span></label>
+          <label style="cursor:pointer"><input type="radio" name="upload-doc-type" value="faq" style="accent-color:var(--violet)" /> <span style="font-size:13px">FAQ</span></label>
+          <label style="cursor:pointer"><input type="radio" name="upload-doc-type" value="manual" style="accent-color:var(--violet)" /> <span style="font-size:13px">手册</span></label>
+        </div>
+      </div>
+
+      <!-- Progress -->
+      <div id="upload-progress" style="display:none;margin-top:16px">
+        <div style="display:flex;align-items:center;gap:10px">
+          <div style="flex:1;height:6px;background:var(--paper-3);border-radius:3px;overflow:hidden">
+            <div id="progress-bar" style="height:100%;background:var(--violet);width:0%;transition:width 0.3s;border-radius:3px"></div>
+          </div>
+          <span id="progress-text" style="font-size:12px;font-weight:600;color:var(--violet);min-width:32px;text-align:right">0%</span>
+        </div>
+        <div id="upload-status" style="font-size:12px;color:var(--ink-3);margin-top:6px"></div>
+      </div>
+
+      <!-- Actions -->
+      <div style="margin-top:20px;display:flex;gap:10px;justify-content:flex-end">
+        <button class="btn btn-ghost" onclick="closeUploadModal()">取消</button>
+        <button id="upload-btn" class="btn btn-violet" onclick="doUpload()" disabled>
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          开始上传
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- Toast -->
 <div id="toast"></div>
 
@@ -1088,10 +1148,12 @@ body {
  *   GET  /api/v1/health/alerts    - 告警信息
  *
  * 文档管理:
- *   GET  /api/v1/admin/documents       - 文档列表
- *   POST /api/v1/admin/documents       - 创建文档
+ *   GET  /api/v1/admin/documents          - 文档列表
+ *   POST /api/v1/admin/documents          - 创建文档 (JSON body)
+ *   POST /api/v1/admin/documents/upload   - 上传文件 (multipart)
+ *   PUT  /api/v1/admin/documents/{id}      - 更新文档
+ *   DELETE /api/v1/admin/documents/{id}    - 删除文档
  *   POST /api/v1/admin/documents/{id}/reindex - 重建索引
- *   POST /api/v1/admin/documents/{id}  - 删除文档
  *
  * 增量摄取:
  *   POST /api/v1/admin/ingest/incremental - 执行增量摄取
@@ -1124,6 +1186,8 @@ const API_CONFIG = {
         HEALTH_DETAILED: '/api/v1/health/detailed',
         HEALTH_ALERTS: '/api/v1/health/alerts',
         DOCUMENTS: '/api/v1/admin/documents',
+        DOCUMENT_UPLOAD: '/api/v1/admin/documents/upload',
+        DOCUMENT_DELETE: (id) => `/api/v1/admin/documents/${id}`,
         DOCUMENT_REINDEX: (id) => `/api/v1/admin/documents/${id}/reindex`,
         INGEST_INCREMENTAL: '/api/v1/admin/ingest/incremental',
         RETRIEVE_DEBUG: '/api/v1/debug/retrieve',
@@ -1502,22 +1566,143 @@ async function reindexDoc(id) {
 
 async function deleteDoc(id) {
   if (!confirm(`确定删除文档 #${id}？`)) return;
-  const res = await apiPost(`/api/v1/admin/documents/${id}`, { _method: 'DELETE' });
+  const res = await apiFetch(API_CONFIG.ENDPOINTS.DOCUMENT_DELETE(id), { method: 'DELETE' });
   showToast(res.ok ? '删除成功' : '删除失败', res.ok ? 'success' : 'error');
   loadDocs();
 }
 
-function openCreateDoc() {
-  const title = prompt('文档标题:');
-  if (!title) return;
-  const type = prompt('类型 (product/policy/faq/manual):', 'product');
-  if (!type) return;
-  const content = prompt('JSON 内容:', '{"title":"' + title + '","content":"内容..."}');
-  if (!content) return;
-  try { JSON.parse(content); } catch { showToast('JSON 格式错误', 'error'); return; }
-  apiPost('/api/v1/admin/documents', { title, doc_type: type, content: JSON.parse(content), source: 'manual' })
-    .then(r => { showToast(r.ok ? '创建成功' : '创建失败', r.ok ? 'success' : 'error'); loadDocs(); });
+let selectedFile = null;
+
+function openUploadModal() {
+  document.getElementById('upload-modal').style.display = 'flex';
+  selectedFile = null;
+  resetModalState();
 }
+
+function closeUploadModal() {
+  document.getElementById('upload-modal').style.display = 'none';
+  selectedFile = null;
+  resetModalState();
+}
+
+function resetModalState() {
+  document.getElementById('drop-idle').style.display = 'block';
+  document.getElementById('drop-file').style.display = 'none';
+  document.getElementById('selected-file-name').textContent = '';
+  document.getElementById('selected-file-size').textContent = '';
+  document.getElementById('file-input').value = '';
+  document.getElementById('upload-progress').style.display = 'none';
+  document.getElementById('upload-btn').disabled = true;
+}
+
+function handleFileSelect(input) {
+  if (input.files && input.files[0]) {
+    onFileChosen(input.files[0]);
+  }
+}
+
+function handleFileDrop(event) {
+  event.preventDefault();
+  document.getElementById('drop-zone').style.borderColor = '';
+  document.getElementById('drop-zone').style.background = '';
+  if (event.dataTransfer.files && event.dataTransfer.files[0]) {
+    onFileChosen(event.dataTransfer.files[0]);
+  }
+}
+
+function onFileChosen(file) {
+  const allowed = ['.pdf', '.docx', '.html', '.htm'];
+  const ext = '.' + file.name.split('.').pop().toLowerCase();
+  if (!allowed.includes(ext)) {
+    showToast('不支持的文件类型，仅支持 PDF / DOCX / HTML', 'error');
+    return;
+  }
+  selectedFile = file;
+  document.getElementById('drop-idle').style.display = 'none';
+  document.getElementById('drop-file').style.display = 'block';
+  document.getElementById('selected-file-name').textContent = file.name;
+  document.getElementById('selected-file-size').textContent = formatFileSize(file.size);
+  document.getElementById('upload-btn').disabled = false;
+}
+
+function formatFileSize(bytes) {
+  if (bytes < 1024) return bytes + ' B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
+}
+
+function getSelectedDocType() {
+  const radios = document.getElementsByName('upload-doc-type');
+  for (const r of radios) { if (r.checked) return r.value; }
+  return 'product';
+}
+
+async function doUpload() {
+  if (!selectedFile) return;
+  const btn = document.getElementById('upload-btn');
+  const progress = document.getElementById('upload-progress');
+  const statusEl = document.getElementById('upload-status');
+  const bar = document.getElementById('progress-bar');
+  const pct = document.getElementById('progress-text');
+
+  btn.disabled = true;
+  progress.style.display = 'block';
+  bar.style.width = '10%';
+  pct.textContent = '10%';
+  statusEl.textContent = '读取文件...';
+
+  const formData = new FormData();
+  formData.append('file', selectedFile);
+  formData.append('doc_type', getSelectedDocType());
+
+  try {
+    bar.style.width = '30%';
+    pct.textContent = '30%';
+    statusEl.textContent = '上传并解析中...';
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', API_CONFIG.ENDPOINTS.DOCUMENT_UPLOAD);
+
+    // 进度监听（XHR 原生支持上传进度）
+    xhr.upload.onprogress = (e) => {
+      if (e.lengthComputable) {
+        const pct2 = Math.round(30 + (e.loaded / e.total) * 40);
+        bar.style.width = pct2 + '%';
+        pct.textContent = pct2 + '%';
+      }
+    };
+
+    const result = await new Promise((resolve, reject) => {
+      xhr.onload = () => {
+        if (xhr.status >= 200 && xhr.status < 300) {
+          resolve(JSON.parse(xhr.responseText));
+        } else {
+          let msg = xhr.responseText;
+          try { msg = JSON.parse(xhr.responseText).detail?.message || JSON.parse(xhr.responseText).detail || msg; } catch {}
+          reject(new Error(msg));
+        }
+      };
+      xhr.onerror = () => reject(new Error('网络错误'));
+      xhr.ontimeout = () => reject(new Error('请求超时'));
+      xhr.send(formData);
+    });
+
+    bar.style.width = '100%';
+    pct.textContent = '100%';
+    statusEl.textContent = '完成！';
+    showToast(`上传成功：${result.title}（${result.chunks} chunks）`, 'success');
+    setTimeout(() => closeUploadModal(), 800);
+    loadDocs();
+
+  } catch (err) {
+    progress.style.display = 'none';
+    showToast('上传失败: ' + err.message, 'error');
+    btn.disabled = false;
+  }
+}
+
+// 旧函数保留（兼容），重定向到上传弹窗
+function openCreateDoc() { openUploadModal(); }
 
 // ── ══ 增量摄取 ★ ══ ─────────────────────────────────────────────
 

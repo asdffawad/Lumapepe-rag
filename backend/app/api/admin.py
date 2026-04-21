@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile
 
 from app.models.request import DocumentCreateRequest, DocumentUpdateRequest
 
@@ -353,6 +353,146 @@ async def create_document(request: DocumentCreateRequest):
         "doc_type": request.doc_type,
         "chunks": len(chunks),
     }
+
+
+@router.post("/documents/upload")
+async def upload_document(
+    file: UploadFile = File(...),
+    doc_type: str = Form("policy"),
+):
+    """
+    上传并摄取文件（PDF / DOCX / HTML）。
+
+    支持的 doc_type：product / policy / faq / manual
+    文件会保存到临时目录，解析后自动分块向量化入库。
+    """
+    import tempfile
+    import os as _os
+    from app.database.connection import get_db_pool
+    from app.utils.file_ingestor import FileIngestor
+    from app.utils.chunker import TextChunker
+    from app.vectorstore.qdrant_adapter import QdrantClient
+    from app.services.embedding_service import EmbeddingService
+
+    pool = get_db_pool()
+    if pool is None:
+        raise HTTPException(status_code=503, detail={"code": "DB_UNAVAILABLE", "message": "MySQL 未连接"})
+
+    filename = file.filename or "uploaded_file"
+    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+
+    if not FileIngestor.can_parse(filename):
+        raise HTTPException(
+            status_code=415,
+            detail={
+                "code": "UNSUPPORTED_TYPE",
+                "message": f"不支持的文件类型: {ext}，仅支持: {', '.join(FileIngestor.list_supported_types())}",
+            },
+        )
+
+    # 保存到临时文件
+    suffix = ext if ext in (".pdf", ".docx", ".html", ".htm") else ".tmp"
+    with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as tmp:
+        tmp_path = tmp.name
+        content = await file.read()
+        tmp.write(content)
+
+    try:
+        # 解析文件
+        parsed = FileIngestor.parse(tmp_path)
+    except Exception as e:
+        _os.unlink(tmp_path)
+        raise HTTPException(status_code=422, detail={"code": "PARSE_ERROR", "message": f"文件解析失败: {e}"})
+    finally:
+        _os.unlink(tmp_path)
+
+    # 计算 hash 去重
+    file_hash = hashlib.sha256(content).hexdigest()
+
+    # 检查是否已存在
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "SELECT id, status FROM documents WHERE file_hash = %s",
+                (file_hash,),
+            )
+            existing = await cur.fetchone()
+            if existing:
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "code": "DUPLICATE",
+                        "message": f"该文件已上传 (id={existing[0]})，请先删除再重新上传",
+                    },
+                )
+
+    # 获取 Qdrant client
+    from app.main import app as _app
+    qdrant: QdrantClient = getattr(_app.state, "milvus_client", None)
+    if qdrant is None or not await qdrant.async_health_check():
+        raise HTTPException(status_code=503, detail={"code": "QDRANT_UNAVAILABLE", "message": "Qdrant 未连接"})
+
+    # 写入 MySQL
+    async with pool.acquire() as conn:
+        async with conn.cursor() as cur:
+            await cur.execute(
+                "INSERT INTO documents (title, doc_type, file_hash, status, source_path, content_raw) "
+                "VALUES (%s, %s, %s, 'processing', %s, %s)",
+                (parsed.title, doc_type, file_hash, filename, json.dumps({"title": parsed.title, "content": parsed.content, "markets": parsed.markets, "lang": parsed.lang}, ensure_ascii=False)),
+            )
+            doc_db_id = cur.lastrowid
+
+    try:
+        # 分块
+        chunker = TextChunker(chunk_size=512, overlap=64)
+        chunks = chunker.chunk_structured(
+            {"title": parsed.title, "content": parsed.content, "markets": parsed.markets, "lang": parsed.lang},
+            doc_db_id,
+            filename,
+            doc_type,
+        )
+        texts = [c.content for c in chunks]
+
+        # 向量化并入库
+        embed_service = EmbeddingService.get_instance()
+        vectors = await embed_service.embed(texts)
+        await qdrant.insert(
+            vectors=vectors,
+            contents=texts,
+            metadata=[{} for _ in chunks],
+            doc_id=doc_db_id,
+            source=filename,
+            doc_type=doc_type,
+        )
+
+        # 更新状态
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE documents SET status = 'done', indexed_at = NOW(), chunk_count = %s WHERE id = %s",
+                    (len(chunks), doc_db_id),
+                )
+
+        return {
+            "status": "success",
+            "doc_id": doc_db_id,
+            "title": parsed.title,
+            "doc_type": doc_type,
+            "file_name": filename,
+            "chunks": len(chunks),
+            "markets": parsed.markets,
+            "lang": parsed.lang,
+        }
+
+    except Exception as e:
+        # 失败时标记
+        async with pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE documents SET status = 'failed' WHERE id = %s",
+                    (doc_db_id,),
+                )
+        raise HTTPException(status_code=500, detail={"code": "INGEST_ERROR", "message": f"向量化入库失败: {e}"})
 
 
 @router.put("/documents/{doc_id}")
