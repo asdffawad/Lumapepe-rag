@@ -178,16 +178,16 @@ class ProductContextService:
         name = product_context.get("product_name", "Unknown")
 
         prompt_parts = [
-            f"【用户当前浏览商品信息】",
+            f"商品信息：",
             f"商品名称: {name}",
         ]
 
         # SKU特有信息
         if product_type == "SKU":
             if product_context.get("sku_price"):
-                prompt_parts.append(f"SKU价格: ${product_context['sku_price']:.2f}")
+                prompt_parts.append(f"价格: ${product_context['sku_price']:.2f}")
             if product_context.get("sku_stock") is not None:
-                prompt_parts.append(f"SKU库存: {product_context['sku_stock']}")
+                prompt_parts.append(f"库存: {product_context['sku_stock']}")
             if product_context.get("bar_code"):
                 prompt_parts.append(f"条形码: {product_context['bar_code']}")
             if product_context.get("properties"):
@@ -197,14 +197,14 @@ class ProductContextService:
         if product_context.get("price"):
             prompt_parts.append(f"商品价格: ${product_context['price']:.2f}")
         if product_context.get("stock") is not None:
-            prompt_parts.append(f"商品库存: {product_context['stock']}")
-        
+            prompt_parts.append(f"库存: {product_context['stock']}")
+
         # 使用解析后的商品简介（纯文本）
         if product_context.get("parsed_introduction"):
             intro_segments = product_context["parsed_introduction"]
             intro_texts = [seg["content"] for seg in intro_segments if seg.get("type") == "text"]
             if intro_texts:
-                prompt_parts.append(f"商品简介: {' '.join(intro_texts)}")
+                prompt_parts.append(' '.join(intro_texts))
 
         # 使用解析后的商品详情（纯文本）
         if product_context.get("parsed_description"):
@@ -214,15 +214,7 @@ class ProductContextService:
                 desc = ' '.join(desc_texts)
                 if len(desc) > 500:
                     desc = desc[:500] + "..."
-                prompt_parts.append(f"商品详情: {desc}")
-        
-        # 添加图片标记
-        if product_context.get("has_images"):
-            prompt_parts.append("【商品包含图片】")
-        
-        # 添加HTML警告
-        if product_context.get("has_html"):
-            prompt_parts.append("【注意：商品详情包含HTML格式内容】")
+                prompt_parts.append(desc)
 
         return "\n".join(prompt_parts)
 

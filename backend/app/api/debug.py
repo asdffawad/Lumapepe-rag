@@ -558,7 +558,6 @@ async def debug_retrieve(request: RetrieveRequest):
                 "回答规范：\n"
                 "- 只基于知识库内容回答，不要编造信息\n"
                 "- 如知识库中没有相关信息，请明确告知用户\n"
-                "- 回答时标注信息来源，例如【商品详情】【FAQ】【退换货政策】\n"
                 "- 回答要专业、友好、简洁"
             )
             user_prompt = f"【用户问题】\n{request.query}\n\n【相关知识】\n{context_text}\n\n请根据以上信息回答用户问题。"
