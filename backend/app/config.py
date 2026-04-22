@@ -133,6 +133,16 @@ class ProductConfig:
 
 
 @dataclass
+class STTConfig:
+    api_key: str = ""
+    base_url: str = "https://dashscope.aliyuncs.com/api-v1/services/asr"
+    model: str = "paraformer-realtime-v2"
+    sample_rate: int = 16000
+    format: str = "wav"
+    timeout: int = 30
+
+
+@dataclass
 class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
     db: DBConfig = field(default_factory=DBConfig)
@@ -145,6 +155,7 @@ class AppConfig:
     websocket: WebSocketConfig = field(default_factory=WebSocketConfig)
     ingest: IngestConfig = field(default_factory=IngestConfig)
     product: ProductConfig = field(default_factory=ProductConfig)  # 商品检索配置
+    stt: STTConfig = field(default_factory=STTConfig)  # STT 语音识别配置
     cors_origins: list[str] = field(default_factory=lambda: ["*"])
     debug: bool = False
 
@@ -249,6 +260,12 @@ def get_config() -> AppConfig:
             fuzzy_threshold=int(os.getenv("PRODUCT_FUZZY_THRESHOLD", "80")),
             max_batch_size=int(os.getenv("PRODUCT_MAX_BATCH_SIZE", "100")),
             enabled=_str_to_bool(os.getenv("PRODUCT_ENABLED", "true")),
+        ),
+        stt=STTConfig(
+            api_key=os.getenv("DASHSCOPE_API_KEY", ""),
+            base_url=os.getenv("STT_BASE_URL", "https://dashscope.aliyuncs.com/api-v1/services/asr"),
+            model=os.getenv("STT_MODEL", "paraformer-realtime-v2"),
+            timeout=int(os.getenv("STT_TIMEOUT", "30")),
         ),
         cors_origins=os.getenv("CORS_ORIGINS", "*").split(","),
         debug=_str_to_bool(os.getenv("DEBUG")),
