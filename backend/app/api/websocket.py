@@ -597,7 +597,7 @@ async def handle_voice_record(
     session_id: str,
     user_id: str,
     audio_data: str | None,
-    format: str = "wav",
+    format: str = "pcm",
 ) -> None:
     """
     Handle voice recording submission:
