@@ -12,12 +12,20 @@ Based on DashScope Paraformer API research:
 from __future__ import annotations
 
 import asyncio
-import json
+import time
 import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-import websockets
+from app.logging_config import get_logger
+from app import metrics as _metrics
+
+
+_logger = get_logger("stt.service")
+
+# STT metrics (extend as needed)
+_stt_calls_total = _metrics.llm_calls_total  # Reuse LLM metric pattern
+_stt_duration_seconds = _metrics.llm_call_duration_seconds
 
 
 # ---------------------------------------------------------------------------
@@ -288,102 +296,117 @@ class DashScopeProvider(SpeechToTextProvider):
 
     async def _stream_audio(self, audio_stream):
         """
-        Internal streaming via WebSocket protocol.
+        Internal streaming via DashScope WebSocket protocol.
 
-        Protocol flow:
+        Protocol flow (per official DashScope docs):
         1. Connect to wss://dashscope.aliyuncs.com/api-ws/v1/inference
-        2. Send run-task JSON command
-        3. Wait for task-started event
+        2. Send run-task JSON command with task_id
+        3. Wait for task-started event (status 200)
         4. Stream binary audio chunks
-        5. Send finish-task command
-        6. Yield result-generated events until task-finished
+        5. Receive result-generated events with transcription text
+        6. Send finish-task command
+        7. Close connection
         """
+        import httpx
+
         task_id = uuid.uuid4().hex[:32]
         ws_url = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
-        headers = {"Authorization": f"Bearer {self.config.api_key}"}
+
+        _logger.info(
+            "DashScope streaming started",
+            extra={"task_id": task_id, "model": self.config.model}
+        )
+
+        start_time = time.monotonic()
+        status = "success"
 
         try:
-            async with websockets.connect(ws_url, extra_headers=headers) as ws:
-                run_task_msg = {
-                    "header": {
-                        "action": "run-task",
-                        "task_id": task_id,
-                        "streaming": "duplex"
-                    },
-                    "payload": {
-                        "task_group": "audio",
-                        "task": "asr",
-                        "function": "recognition",
-                        "model": self.config.model,
-                        "parameters": {
-                            "format": self.config.format,
-                            "sample_rate": self.config.sample_rate,
-                            "disfluency_removal_enabled": False,
+            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
+                headers = {"Authorization": f"Bearer {self.config.api_key}"}
+                async with client.connect(ws_url, headers=headers) as ws:
+                    # Step 1: Send run-task command
+                    run_task_msg = {
+                        "header": {
+                            "action": "run-task",
+                            "task_id": task_id,
+                            "streaming": "duplex"
                         },
-                        "input": {}
+                        "payload": {
+                            "task_group": "audio",
+                            "task": "asr",
+                            "function": "recognition",
+                            "model": self.config.model,
+                            "parameters": {
+                                "format": self.config.format,
+                                "sample_rate": self.config.sample_rate,
+                            },
+                            "input": {}
+                        }
                     }
-                }
 
-                await ws.send(json.dumps(run_task_msg))
+                    _logger.debug("Sending run-task message", extra={"task_id": task_id})
+                    await ws.send_json(run_task_msg)
 
-                task_started = False
-                while True:
-                    response = await ws.recv()
-                    event = json.loads(response)
-                    event_type = event.get("header", {}).get("event")
+                    # Step 2: Wait for task-started (status 200)
+                    resp = await ws.receive_json()
+                    resp_header = resp.get("header", {})
+                    if resp_header.get("status") != 200:
+                        error_msg = resp_header.get("message", "Unknown error")
+                        raise STTError(f"DashScope task start failed: {error_msg}")
 
-                    if event_type == "task-started":
-                        task_started = True
-                        break
-                    elif event_type == "task-failed":
-                        error_msg = event.get("header", {}).get("error_message", "Unknown error")
-                        raise STTError(f"Task failed: {error_msg}")
+                    _logger.debug("Task started successfully", extra={"task_id": task_id})
 
-                if not task_started:
-                    raise STTError("Did not receive task-started event")
+                    # Step 3: Send audio chunks
+                    async for chunk in self._iter_audio(audio_stream):
+                        await ws.send_bytes(chunk)
+                        await asyncio.sleep(0.05)  # Small delay to avoid flooding
 
-                async for chunk in self._iter_audio(audio_stream):
-                    await ws.send(chunk)
-                    await asyncio.sleep(0.1)
+                    _logger.debug("All audio chunks sent", extra={"task_id": task_id})
 
-                finish_task_msg = {
-                    "header": {
-                        "action": "finish-task",
-                        "task_id": task_id,
-                        "streaming": "duplex"
-                    },
-                    "payload": {
-                        "input": {}
-                    }
-                }
-                await ws.send(json.dumps(finish_task_msg))
+                    # Step 4: Receive transcription results and yield as they arrive
+                    while True:
+                        try:
+                            msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
+                            header = msg.get("header", {})
+                            action = header.get("action")
 
-                full_text = []
-                while True:
-                    try:
-                        response = await asyncio.wait_for(ws.recv(), timeout=60.0)
-                        event = json.loads(response)
-                        event_type = event.get("header", {}).get("event")
+                            if action == "finish-task":
+                                _logger.debug("Received finish-task from server", extra={"task_id": task_id})
+                                break
 
-                        if event_type == "result-generated":
-                            sentence = event.get("payload", {}).get("output", {}).get("sentence", {})
-                            text = sentence.get("text", "")
+                            # Handle result-generated events
+                            text = msg.get("payload", {}).get("choices", [{}])[0].get("text", "")
                             if text:
-                                full_text.append(text)
+                                _logger.info(
+                                    "DashScope transcription result",
+                                    extra={"text_length": len(text), "task_id": task_id}
+                                )
                                 yield text
 
-                        elif event_type == "task-finished":
+                        except asyncio.TimeoutError:
+                            # No more text coming within timeout
+                            _logger.debug("No more transcription results (timeout)", extra={"task_id": task_id})
                             break
 
-                        elif event_type == "task-failed":
-                            error_msg = event.get("header", {}).get("error_message", "Unknown error")
-                            raise STTError(f"Task failed: {error_msg}")
+                    # Step 5: Send finish-task command
+                    _logger.debug("Sending finish-task command", extra={"task_id": task_id})
+                    await ws.send_json({
+                        "header": {"action": "finish-task", "task_id": task_id}
+                    })
 
-                    except asyncio.TimeoutError:
-                        raise STTError("Timeout waiting for transcription results")
-
-        except websockets.exceptions.WebSocketException as e:
+        except STTError:
+            raise
+        except Exception as e:
+            status = "error"
+            _logger.error(
+                "DashScope streaming error",
+                extra={"error": str(e), "task_id": task_id}
+            )
             raise STTError(f"WebSocket error: {e}")
+        finally:
+            duration = time.monotonic() - start_time
+            _stt_calls_total.labels(model=self.config.model, status=status).inc()
+            _stt_duration_seconds.labels(model=self.config.model).observe(duration)
 
     async def _iter_audio(self, audio_stream):
         """Convert audio source to async iterable of chunks."""
