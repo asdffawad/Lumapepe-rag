@@ -55,7 +55,7 @@ async def websocket_chat(
     spu_id: Optional[int] = Query(None),
 ):
     """
-    WebSocket 聊天端点（企业级）
+    WebSocket 聊天端点
 
     认证：使用 Authorization Header 或 Sec-WebSocket-Protocol
     Headers:

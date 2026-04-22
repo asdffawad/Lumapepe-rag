@@ -1,5 +1,5 @@
 """
-WebSocket 连接管理器（企业级）
+WebSocket 连接管理器
 负责管理活跃连接、会话隔离、心跳保活、连接数限制、消息限流
 
 分布式部署支持：
@@ -105,7 +105,7 @@ class SlidingWindowLimiter:
 
 class ConnectionManager:
     """
-    WebSocket 连接管理器（企业级）
+    WebSocket 连接管理器
 
     功能:
     - Bearer Token 认证

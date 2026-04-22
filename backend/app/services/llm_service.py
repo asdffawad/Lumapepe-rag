@@ -339,12 +339,12 @@ class MockProvider(LLMBase):
 
 
 # ---------------------------------------------------------------------------
-# Qwen Provider — 企业级实现
+# Qwen Provider — 实现
 # ---------------------------------------------------------------------------
 @register_provider("qwen")
 class QwenProvider(LLMBase, _BaseHTTPClientMixin):
     """
-    通义千问 Provider（企业级）
+    通义千问 Provider
     - 连接池复用
     - 精确 token 计数
     - 结构化日志

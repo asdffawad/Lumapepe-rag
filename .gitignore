@@ -61,3 +61,8 @@ celerybeat.pid
 # Misc
 *.bak
 *.tmp
+
+# Cursor / Agent settings /MCP
+.agents/
+.cursor/
+.playwright-mcp/
