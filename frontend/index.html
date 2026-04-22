@@ -648,6 +648,202 @@
             .debug-content { flex-direction: column; }
             .debug-detail { width: 100%; border-left: none; border-top: 1px solid var(--border); }
         }
+
+        /* ===== Voice Input ===== */
+        .voice-btn {
+            width: 48px;
+            height: 48px;
+            background: var(--bg-card);
+            border: 2px solid var(--border);
+            border-radius: 14px;
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+            flex-shrink: 0;
+        }
+
+        .voice-btn:hover { background: var(--bg-hover); border-color: var(--accent); }
+        .voice-btn.recording {
+            background: rgba(239, 68, 68, 0.15);
+            border-color: var(--error);
+            animation: recordPulse 1.5s infinite;
+        }
+
+        @keyframes recordPulse {
+            0%, 100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+            50% { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
+        }
+
+        .voice-btn svg { width: 20px; height: 20px; stroke: var(--text-secondary); }
+        .voice-btn.recording svg { stroke: var(--error); }
+
+        /* Voice mode panel */
+        .voice-mode-panel {
+            display: none;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 20px;
+            margin-bottom: 16px;
+            animation: slideDown 0.3s ease;
+        }
+        .voice-mode-panel.open { display: block; }
+
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        .voice-mode-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 16px;
+        }
+
+        .voice-mode-title {
+            font-size: 14px;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .voice-mode-close {
+            background: none;
+            border: none;
+            color: var(--text-muted);
+            cursor: pointer;
+            font-size: 18px;
+            padding: 4px 8px;
+        }
+        .voice-mode-close:hover { color: var(--text-primary); }
+
+        .voice-waveform {
+            height: 60px;
+            background: var(--bg-secondary);
+            border-radius: 10px;
+            margin-bottom: 16px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            overflow: hidden;
+            gap: 4px;
+        }
+
+        .voice-waveform .bar {
+            width: 4px;
+            background: var(--accent);
+            border-radius: 2px;
+            transition: height 0.1s ease;
+            opacity: 0.6;
+        }
+
+        .voice-controls {
+            display: flex;
+            gap: 12px;
+            justify-content: center;
+        }
+
+        .voice-control-btn {
+            width: 56px;
+            height: 56px;
+            border-radius: 50%;
+            border: 2px solid var(--border);
+            background: var(--bg-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s;
+        }
+
+        .voice-control-btn.stop-btn { border-color: var(--error); background: rgba(239, 68, 68, 0.1); }
+        .voice-control-btn.stop-btn:hover { background: rgba(239, 68, 68, 0.2); }
+        .voice-control-btn.cancel-btn { border-color: var(--text-muted); }
+        .voice-control-btn.cancel-btn:hover { background: var(--bg-hover); }
+
+        .voice-control-btn svg { width: 22px; height: 22px; stroke: var(--text-secondary); }
+        .voice-control-btn.stop-btn svg { stroke: var(--error); }
+
+        .voice-duration {
+            text-align: center;
+            font-size: 14px;
+            color: var(--text-secondary);
+            margin-bottom: 12px;
+            font-variant-numeric: tabular-nums;
+        }
+
+        .voice-status {
+            text-align: center;
+            font-size: 13px;
+            color: var(--text-muted);
+            margin-top: 8px;
+        }
+        .voice-status.listening { color: var(--error); }
+
+        /* Voice mode toggle */
+        .voice-mode-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-top: 12px;
+        }
+        .voice-mode-toggle:hover { background: var(--bg-hover); color: var(--text-primary); }
+        .voice-mode-toggle.active {
+            background: rgba(99, 102, 241, 0.15);
+            border-color: var(--accent);
+            color: var(--accent-light);
+        }
+        .voice-mode-toggle svg { width: 16px; height: 16px; }
+
+        /* Voice transcript preview */
+        .voice-preview {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-size: 14px;
+            color: var(--text-primary);
+            margin-bottom: 12px;
+            min-height: 44px;
+            display: none;
+        }
+
+        .voice-preview-actions {
+            display: none;
+            gap: 8px;
+            justify-content: flex-end;
+            margin-bottom: 12px;
+        }
+
+        .voice-preview-btn {
+            padding: 6px 16px;
+            border-radius: 8px;
+            font-size: 13px;
+            cursor: pointer;
+            border: 1px solid var(--border);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            transition: all 0.2s;
+        }
+        .voice-preview-btn:hover { background: var(--bg-hover); }
+        .voice-preview-btn.confirm {
+            background: var(--accent);
+            border-color: var(--accent);
+            color: white;
+        }
+        .voice-preview-btn.confirm:hover { background: var(--accent-light); border-color: var(--accent-light); }
     </style>
 </head>
 <body>
@@ -747,7 +943,50 @@
             </div>
 
             <div class="chat-input-area">
+                <!-- Voice Mode Panel -->
+                <div class="voice-mode-panel" id="voiceModePanel">
+                    <div class="voice-mode-header">
+                        <div class="voice-mode-title">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                                <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                            </svg>
+                            实时语音转写
+                        </div>
+                        <button class="voice-mode-close" id="voiceModeCloseBtn">&times;</button>
+                    </div>
+                    <div class="voice-preview" id="voicePreview"></div>
+                    <div class="voice-preview-actions" id="voicePreviewActions">
+                        <button class="voice-preview-btn" id="voiceCancelPreviewBtn">取消</button>
+                        <button class="voice-preview-btn confirm" id="voiceConfirmPreviewBtn">发送</button>
+                    </div>
+                    <div class="voice-duration" id="voiceDuration">00:00</div>
+                    <div class="voice-waveform" id="voiceWaveform"></div>
+                    <div class="voice-status" id="voiceStatus">点击开始录音</div>
+                    <div class="voice-controls" id="voiceControls" style="display:none;">
+                        <button class="voice-control-btn cancel-btn" id="voiceCancelBtn" title="取消">
+                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
+                                <line x1="18" y1="6" x2="6" y2="18"/>
+                                <line x1="6" y1="6" x2="18" y2="18"/>
+                            </svg>
+                        </button>
+                        <button class="voice-control-btn stop-btn" id="voiceStopBtn" title="停止">
+                            <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
+                                <rect x="6" y="6" width="12" height="12" rx="2"/>
+                            </svg>
+                        </button>
+                    </div>
+                </div>
+
                 <div class="input-wrapper">
+                    <button class="voice-btn" id="voiceBtn" title="快捷录音">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
+                            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                            <line x1="12" y1="19" x2="12" y2="23"/>
+                            <line x1="8" y1="23" x2="16" y2="23"/>
+                        </svg>
+                    </button>
                     <div class="input-container">
                         <input type="text" id="messageInput" placeholder="输入您的问题，按 Enter 发送..." />
                     </div>
@@ -757,6 +996,13 @@
                             <polygon points="22,2 15,22 11,13 2,9"/>
                         </svg>
                     </button>
+                </div>
+                <div class="voice-mode-toggle" id="voiceModeToggle">
+                    <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/>
+                    </svg>
+                    语音模式
                 </div>
                 <div class="quick-questions">
                     <span class="quick-q" onclick="askQuestion('查询我的订单状态', this)">&#128722; 查询订单</span>
@@ -1162,7 +1408,22 @@
         debugToggle: document.getElementById('debugToggle'),
         debugList: document.getElementById('debugList'),
         debugDetail: document.getElementById('debugDetail'),
-        debugBadge: document.getElementById('debugBadge')
+        debugBadge: document.getElementById('debugBadge'),
+        // Voice DOM
+        voiceBtn: document.getElementById('voiceBtn'),
+        voiceModePanel: document.getElementById('voiceModePanel'),
+        voiceModeToggle: document.getElementById('voiceModeToggle'),
+        voiceModeCloseBtn: document.getElementById('voiceModeCloseBtn'),
+        voiceDuration: document.getElementById('voiceDuration'),
+        voiceWaveform: document.getElementById('voiceWaveform'),
+        voiceStatus: document.getElementById('voiceStatus'),
+        voiceControls: document.getElementById('voiceControls'),
+        voiceCancelBtn: document.getElementById('voiceCancelBtn'),
+        voiceStopBtn: document.getElementById('voiceStopBtn'),
+        voicePreview: document.getElementById('voicePreview'),
+        voicePreviewActions: document.getElementById('voicePreviewActions'),
+        voiceCancelPreviewBtn: document.getElementById('voiceCancelPreviewBtn'),
+        voiceConfirmPreviewBtn: document.getElementById('voiceConfirmPreviewBtn'),
     };
 
     // ==================== 状态 ====================
@@ -1190,7 +1451,17 @@
         productContext: null,
         urlSkuId: null,
         urlSpuId: null,
-        quickQuestionActive: null
+        quickQuestionActive: null,
+        // Voice state
+        isVoiceMode: false,
+        isRecording: false,
+        mediaRecorder: null,
+        audioChunks: [],
+        voiceStartTime: null,
+        voiceTimer: null,
+        voicePreviewText: null,
+        voiceStream: null,
+        voiceAutoStopTimer: null,
     };
 
     // ==================== 调试面板控制 ====================
@@ -1714,6 +1985,21 @@
         if (state.ws) state.ws.close();
     });
 
+    // Voice button click (quick record)
+    dom.voiceBtn.addEventListener('click', toggleQuickRecord);
+
+    // Voice mode toggle
+    dom.voiceModeToggle.addEventListener('click', toggleVoiceMode);
+    dom.voiceModeCloseBtn.addEventListener('click', toggleVoiceMode);
+
+    // Recording controls
+    dom.voiceStopBtn.addEventListener('click', stopRecording);
+    dom.voiceCancelBtn.addEventListener('click', cancelRecording);
+
+    // Preview actions
+    dom.voiceCancelPreviewBtn.addEventListener('click', cancelVoicePreview);
+    dom.voiceConfirmPreviewBtn.addEventListener('click', confirmVoicePreview);
+
     // ==================== 启动 ====================
     document.addEventListener('DOMContentLoaded', init);
 
@@ -1722,6 +2008,269 @@
     window.clearDebugLog = clearDebugLog;
     window.askQuestion = askQuestion;
     window.RequestLogger = RequestLogger;
+
+    // ==================== Voice Input ====================
+
+    function formatDuration(ms) {
+        const s = Math.floor(ms / 1000);
+        const m = Math.floor(s / 60);
+        const sec = s % 60;
+        return `${String(m).padStart(2, '0')}:${String(sec).padStart(2, '0')}`;
+    }
+
+    function initWaveformBars() {
+        dom.voiceWaveform.innerHTML = '';
+        for (let i = 0; i < 20; i++) {
+            const bar = document.createElement('div');
+            bar.className = 'bar';
+            bar.style.height = '10px';
+            dom.voiceWaveform.appendChild(bar);
+        }
+    }
+
+    function updateWaveform() {
+        if (!state.isRecording) return;
+        dom.voiceWaveform.querySelectorAll('.bar').forEach(bar => {
+            const h = Math.random() * 35 + 8;
+            bar.style.height = h + 'px';
+        });
+        requestAnimationFrame(updateWaveform);
+    }
+
+    function toggleVoiceMode() {
+        state.isVoiceMode = !state.isVoiceMode;
+        dom.voiceModePanel.classList.toggle('open', state.isVoiceMode);
+        dom.voiceModeToggle.classList.toggle('active', state.isVoiceMode);
+        if (!state.isVoiceMode) {
+            stopRecording();
+        } else {
+            // Auto-start recording when entering voice mode
+            startRecording();
+        }
+    }
+
+    async function startRecording() {
+        try {
+            state.audioChunks = [];
+            state.voiceStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            state.mediaRecorder = new MediaRecorder(state.voiceStream, { mimeType: 'audio/webm' });
+
+            state.mediaRecorder.ondataavailable = (e) => {
+                if (e.data.size > 0) state.audioChunks.push(e.data);
+            };
+
+            state.mediaRecorder.onstop = async () => {
+                const blob = new Blob(state.audioChunks, { type: 'audio/webm' });
+                await sendVoiceRecording(blob);
+            };
+
+            state.mediaRecorder.start(100);
+            state.isRecording = true;
+            state.voiceStartTime = Date.now();
+
+            dom.voiceBtn.classList.add('recording');
+            dom.voiceStatus.textContent = '录音中...';
+            dom.voiceStatus.classList.add('listening');
+            dom.voiceControls.style.display = 'flex';
+            dom.voicePreview.style.display = 'none';
+            dom.voicePreviewActions.style.display = 'none';
+
+            initWaveformBars();
+            updateWaveform();
+
+            state.voiceTimer = setInterval(() => {
+                const elapsed = Date.now() - state.voiceStartTime;
+                dom.voiceDuration.textContent = formatDuration(elapsed);
+            }, 500);
+
+            // Auto-stop at 60 seconds
+            state.voiceAutoStopTimer = setTimeout(() => {
+                if (state.isRecording) stopRecording();
+            }, 60000);
+
+        } catch (err) {
+            console.error('[Voice] Microphone access denied:', err);
+            showToast('无法访问麦克风，请检查权限设置', 'error');
+        }
+    }
+
+    function stopRecording() {
+        if (!state.isRecording || !state.mediaRecorder) return;
+        clearTimeout(state.voiceAutoStopTimer);
+        state.mediaRecorder.stop();
+        if (state.voiceStream) {
+            state.voiceStream.getTracks().forEach(t => t.stop());
+        }
+        state.isRecording = false;
+        clearInterval(state.voiceTimer);
+        dom.voiceBtn.classList.remove('recording');
+        dom.voiceStatus.textContent = '处理中...';
+        dom.voiceStatus.classList.remove('listening');
+    }
+
+    function cancelRecording() {
+        if (!state.isRecording) return;
+        clearTimeout(state.voiceAutoStopTimer);
+        if (state.mediaRecorder && state.mediaRecorder.state !== 'inactive') {
+            state.mediaRecorder.stop();
+        }
+        if (state.voiceStream) {
+            state.voiceStream.getTracks().forEach(t => t.stop());
+        }
+        state.isRecording = false;
+        clearInterval(state.voiceTimer);
+        state.audioChunks = [];
+        dom.voiceBtn.classList.remove('recording');
+        dom.voiceStatus.textContent = '已取消';
+        dom.voiceStatus.classList.remove('listening');
+        dom.voiceDuration.textContent = '00:00';
+    }
+
+    function blobToBase64(blob) {
+        return new Promise((resolve) => {
+            const reader = new FileReader();
+            reader.onloadend = () => resolve(reader.result.split(',')[1]);
+            reader.readAsDataURL(blob);
+        });
+    }
+
+    async function webmToPcmWavBase64(blob) {
+        const audioContext = new AudioContext();
+        const arrayBuffer = await blob.arrayBuffer();
+        const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+        const pcmData = audioBuffer.getChannelData(0);
+        const sampleRate = audioBuffer.sampleRate;
+        audioContext.close();
+
+        const numChannels = 1;
+        const bitsPerSample = 16;
+        const bytesPerSample = bitsPerSample / 8;
+        const blockAlign = numChannels * bytesPerSample;
+        const byteRate = sampleRate * blockAlign;
+        const dataSize = pcmData.length * bytesPerSample;
+        const buffer = new ArrayBuffer(44 + dataSize);
+        const view = new DataView(buffer);
+
+        // RIFF header
+        writeString(view, 0, 'RIFF');
+        view.setUint32(4, 36 + dataSize, true);
+        writeString(view, 8, 'WAVE');
+        // fmt chunk
+        writeString(view, 12, 'fmt ');
+        view.setUint32(16, 16, true);
+        view.setUint16(20, 1, true);
+        view.setUint16(22, numChannels, true);
+        view.setUint32(24, sampleRate, true);
+        view.setUint32(28, byteRate, true);
+        view.setUint16(32, blockAlign, true);
+        view.setUint16(34, bitsPerSample, true);
+        // data chunk
+        writeString(view, 36, 'data');
+        view.setUint32(40, dataSize, true);
+
+        let offset = 44;
+        for (let i = 0; i < pcmData.length; i++) {
+            const s = Math.max(-1, Math.min(1, pcmData[i]));
+            view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+            offset += 2;
+        }
+
+        return btoa(String.fromCharCode.apply(null, new Uint8Array(buffer)));
+    }
+
+    function writeString(view, offset, str) {
+        for (let i = 0; i < str.length; i++) {
+            view.setUint8(offset + i, str.charCodeAt(i));
+        }
+    }
+
+    async function sendVoiceRecording(blob) {
+        dom.voiceStatus.textContent = '识别中...';
+
+        if (!state.ws || state.ws.readyState !== WebSocket.OPEN) {
+            showToast('WebSocket 未连接', 'error');
+            dom.voiceStatus.textContent = '连接不可用';
+            return;
+        }
+
+        try {
+            dom.voiceStatus.textContent = '转码中...';
+            const base64 = await webmToPcmWavBase64(blob);
+            state.ws.send(JSON.stringify({
+                type: 'voice_record',
+                audio: base64,
+                format: 'pcm',
+            }));
+        } catch (err) {
+            console.error('[Voice] Audio conversion failed:', err);
+            showToast('音频转码失败，将发送原始格式', 'warning');
+            const base64 = await blobToBase64(blob);
+            state.ws.send(JSON.stringify({
+                type: 'voice_record',
+                audio: base64,
+                format: 'webm',
+            }));
+        }
+    }
+
+    function confirmVoicePreview() {
+        const text = state.voicePreviewText || dom.voicePreview.textContent;
+        if (text && text !== '(未识别到内容)') {
+            dom.messageInput.value = text;
+            // Close voice mode if open
+            if (state.isVoiceMode) {
+                state.isVoiceMode = false;
+                dom.voiceModePanel.classList.remove('open');
+                dom.voiceModeToggle.classList.remove('active');
+            }
+            dom.messageInput.focus();
+        } else {
+            showToast('未识别到有效内容', 'warning');
+        }
+    }
+
+    function cancelVoicePreview() {
+        dom.voicePreview.style.display = 'none';
+        dom.voicePreviewActions.style.display = 'none';
+        state.voicePreviewText = null;
+        dom.voiceStatus.textContent = '点击开始录音';
+        dom.voiceDuration.textContent = '00:00';
+    }
+
+    function toggleQuickRecord() {
+        if (state.isRecording) {
+            stopRecording();
+        } else {
+            startRecording();
+        }
+    }
+
+    // Handle voice_result and voice_error from chat WebSocket
+    const _origHandleMessage = handleMessage;
+    window._voiceState = state;  // Expose for testing
+
+    handleMessage = function(data) {
+        if (data.type === 'voice_result') {
+            dom.voicePreview.textContent = data.text || '(未识别到内容)';
+            dom.voicePreview.style.display = 'block';
+            dom.voicePreviewActions.style.display = 'flex';
+            state.voicePreviewText = data.text;
+            dom.voiceStatus.textContent = '识别完成';
+            dom.voiceStatus.classList.remove('listening');
+            dom.voiceDuration.textContent = '00:00';
+            dom.voiceControls.style.display = 'none';
+            return;
+        }
+        if (data.type === 'voice_error') {
+            showToast(data.message || '语音识别失败', 'error');
+            dom.voiceStatus.textContent = '识别失败';
+            dom.voiceStatus.classList.remove('listening');
+            dom.voiceDuration.textContent = '00:00';
+            dom.voiceControls.style.display = 'none';
+            return;
+        }
+        _origHandleMessage(data);
+    };
 
 })();
 </script>

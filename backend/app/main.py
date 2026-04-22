@@ -30,7 +30,8 @@ from app.services.vector_retriever import MockVectorRetriever, SimpleVectorRetri
 from app.services.reranker import MockReranker, MMRReranker
 from app.services.prompt_builder import MockPromptBuilder, EcommercePromptBuilder
 from app.services.llm_generator import MockLLMGenerator, StandardLLMGenerator
-from app.api import chat, intent, health, admin, debug, websocket, product
+from app.services.stt_service import STTFactory, STTConfig as STTServiceConfig
+from app.api import chat, intent, health, admin, debug, websocket, product, voice_ws
 from app import metrics
 from app.logging_config import get_logger as _get_logger
 
@@ -221,6 +222,18 @@ async def lifespan(app: FastAPI):
     monitor.start()
     app.state.alert_monitor = monitor
 
+    # 初始化 STT 语音识别服务
+    stt_cfg = STTServiceConfig(
+        api_key=config.stt.api_key,
+        base_url=config.stt.base_url,
+        model=config.stt.model,
+        sample_rate=config.stt.sample_rate,
+        format=config.stt.format,
+        timeout=config.stt.timeout,
+    )
+    app.state.stt_provider = STTFactory.create("dashscope", stt_cfg)
+    logger.info("STT provider initialized", extra={"model": config.stt.model})
+
     yield
 
     # Shutdown
@@ -334,6 +347,7 @@ def create_app() -> FastAPI:
     app.include_router(admin.router)
     app.include_router(debug.router)
     app.include_router(websocket.router)
+    app.include_router(voice_ws.router)
 
     # 注册 metrics 路由（Prometheus 采集）
     app.include_router(metrics.router)

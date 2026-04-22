@@ -259,6 +259,15 @@ async def websocket_chat(
                     message_id=data.get("message_id"),
                 )
 
+            elif msg_type == "voice_record":
+                await handle_voice_record(
+                    websocket=websocket,
+                    session_id=session_id,
+                    user_id=user_id,
+                    audio_data=data.get("audio"),
+                    format=data.get("format", "wav"),
+                )
+
             else:
                 await websocket.send_json({
                     "type": "error",
@@ -580,4 +589,97 @@ async def handle_delete_message(
             "type": "error",
             "code": "DELETE_ERROR",
             "message": str(e)
+        })
+
+
+async def handle_voice_record(
+    websocket: WebSocket,
+    session_id: str,
+    user_id: str,
+    audio_data: str | None,
+    format: str = "pcm",
+) -> None:
+    """
+    Handle voice recording submission:
+    1. Receive base64-encoded audio
+    2. Decode and transcribe via DashScope STT
+    3. Return transcribed text to client for confirmation
+    4. Client then sends a normal 'chat' message with the confirmed text
+    """
+    from app.services.stt_service import STTFactory, STTConfig, STTError
+    import base64
+    import os
+
+    if not audio_data:
+        await websocket.send_json({
+            "type": "voice_error",
+            "code": "MISSING_AUDIO",
+            "message": "No audio data provided",
+        })
+        return
+
+    try:
+        audio_bytes = base64.b64decode(audio_data)
+    except Exception:
+        await websocket.send_json({
+            "type": "voice_error",
+            "code": "INVALID_AUDIO",
+            "message": "Invalid base64 audio data",
+        })
+        return
+
+    if len(audio_bytes) > 10 * 1024 * 1024:  # 10MB limit
+        await websocket.send_json({
+            "type": "voice_error",
+            "code": "AUDIO_TOO_LARGE",
+            "message": "Audio exceeds 10MB limit",
+        })
+        return
+
+    _logger.info("Transcribing voice recording", extra={
+        "user_id": user_id,
+        "session_id": session_id,
+        "audio_size_bytes": len(audio_bytes),
+        "format": format,
+    })
+
+    try:
+        api_key = os.getenv("DASHSCOPE_API_KEY", "")
+        if not api_key:
+            raise STTError("DASHSCOPE_API_KEY not configured")
+
+        stt_cfg = STTConfig(api_key=api_key, format=format)
+        stt = STTFactory.create("dashscope", stt_cfg)
+
+        text = await stt.transcribe(audio_bytes)
+
+        await websocket.send_json({
+            "type": "voice_result",
+            "text": text,
+            "session_id": session_id,
+        })
+
+        _logger.info("Voice transcription completed", extra={
+            "user_id": user_id,
+            "session_id": session_id,
+            "text_length": len(text),
+            "text_preview": text[:50] if text else "",
+        })
+
+    except STTError as e:
+        _logger.error("STT transcription failed", extra={"error": str(e), "user_id": user_id})
+        await websocket.send_json({
+            "type": "voice_error",
+            "code": "STT_ERROR",
+            "message": f"Transcription failed: {e}",
+        })
+    except Exception as e:
+        import traceback
+        _logger.error("Voice record handling error", extra={
+            "error": str(e), "traceback": traceback.format_exc()[:500]
+        })
+        await websocket.send_json({
+            "type": "voice_error",
+            "code": "INTERNAL_ERROR",
+            "message": "Transcription service unavailable",
         })
