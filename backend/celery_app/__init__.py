@@ -39,13 +39,9 @@ def make_celery():
                 "task": "celery_app.tasks.cleanup_old_logs",
                 "schedule": 86400.0,
             },
-            "refresh-hot-questions": {
-                "task": "celery_app.tasks.refresh_hot_questions",
-                "schedule": 3600.0,
-            },
             "daily-incremental-ingest": {
                 "task": "celery_app.tasks.incremental_ingest.daily_incremental_ingest",
-                "schedule": crontab(hour=0, minute=0),   # 每日 00:00 执行
+                "schedule": crontab(hour=0, minute=0),
             },
         },
     )

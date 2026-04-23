@@ -18,6 +18,7 @@ from datetime import datetime
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from app.database.connection import create_db_pool
+from app.cache.redis_client import create_redis_pool, get_redis_client
 from app.config import get_config
 
 
@@ -26,7 +27,7 @@ async def process_compensation():
     config = get_config()
 
     # 连接 Redis
-    from app.cache.redis_client import get_redis_client
+    await create_redis_pool(config.redis.url)
     redis_client = get_redis_client()
 
     # 连接 MySQL
