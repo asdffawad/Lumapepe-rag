@@ -648,7 +648,12 @@ async def handle_voice_record(
         if not api_key:
             raise STTError("DASHSCOPE_API_KEY not configured")
 
-        stt_cfg = STTConfig(api_key=api_key, format=format)
+        sample_rate = data.get("sampleRate")
+        stt_cfg = STTConfig(
+            api_key=api_key,
+            format=format,
+            sample_rate=sample_rate if sample_rate else 16000,
+        )
         stt = STTFactory.create("dashscope", stt_cfg)
 
         text = await stt.transcribe(audio_bytes)
