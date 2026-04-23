@@ -43,13 +43,13 @@ async def websocket_voice(
     token: str = Query(None),
 ):
     """
-    Real-time voice transcription WebSocket.
+    Real-time voice transcription WebSocket with true streaming support.
 
     Protocol:
     1. Client connects with ?token=<jwt>
-    2. Server sends: {"type": "connected"}
-    3. Client sends: {"type": "audio", "data": "<base64>", "format": "wav"}
-    4. Server sends: {"type": "stream_text", "text": "<partial transcript>"}
+    2. Server sends: {"type": "connected", "session_id": "..."}
+    3. Client sends: {"type": "audio", "data": "<base64>"} (repeated)
+    4. Server sends: {"type": "stream_text", "text": "<partial transcript>"} (repeated, in real-time)
     5. Client sends: {"type": "stop"}
     6. Server sends: {"type": "done", "text": "<final transcript>"}
     """
@@ -84,8 +84,45 @@ async def websocket_voice(
             "session_id": session_id,
         })
 
-        # Collect audio chunks
-        audio_chunks: list[bytes] = []
+        # Async queue for buffering audio chunks between receiver and transcriber
+        audio_queue: asyncio.Queue = asyncio.Queue()
+        accumulated_text = ""
+
+        async def _queue_to_async_iter():
+            """Convert queue to async iterable."""
+            while True:
+                chunk = await audio_queue.get()
+                if chunk is None:
+                    break
+                yield chunk
+
+        async def _transcribe_and_forward():
+            """Consume audio from queue, stream to DashScope, forward results to client."""
+            nonlocal accumulated_text
+            try:
+                stt = _get_stt_provider()
+                async for text in stt.transcribe_stream(_queue_to_async_iter()):
+                    accumulated_text += text
+                    await websocket.send_json({
+                        "type": "stream_text",
+                        "text": text,
+                    })
+            except STTError as e:
+                _logger.error("STT streaming error", extra={"error": str(e), "user_id": user_id})
+                await websocket.send_json({
+                    "type": "error",
+                    "code": "STT_ERROR",
+                    "message": f"Transcription failed: {e}",
+                })
+            except Exception as e:
+                _logger.error("Unexpected transcription error", extra={"error": str(e), "user_id": user_id})
+                await websocket.send_json({
+                    "type": "error",
+                    "code": "INTERNAL_ERROR",
+                    "message": "Transcription service unavailable",
+                })
+
+        transcriber_task = asyncio.create_task(_transcribe_and_forward())
 
         while True:
             try:
@@ -118,51 +155,28 @@ async def websocket_voice(
                     })
                     continue
 
-                audio_chunks.append(chunk_bytes)
+                await audio_queue.put(chunk_bytes)
 
             elif msg_type == "stop":
-                if not audio_chunks:
-                    await websocket.send_json({
-                        "type": "done",
-                        "text": "",
-                        "session_id": session_id,
-                    })
-                    continue
+                # Signal end of audio input
+                await audio_queue.put(None)
 
+                # Wait for transcriber to finish
                 try:
-                    stt = _get_stt_provider()
-                    full_audio = b"".join(audio_chunks)
-                    text = await stt.transcribe(full_audio)
+                    await asyncio.wait_for(transcriber_task, timeout=30.0)
+                except asyncio.TimeoutError:
+                    _logger.warning("Transcription timed out", extra={"user_id": user_id})
+                    transcriber_task.cancel()
 
-                    await websocket.send_json({
-                        "type": "done",
-                        "text": text,
-                        "session_id": session_id,
-                    })
-                    _logger.info("Transcription completed", extra={
-                        "user_id": user_id,
-                        "session_id": session_id,
-                        "text_length": len(text),
-                    })
+                await websocket.send_json({
+                    "type": "done",
+                    "text": accumulated_text,
+                    "session_id": session_id,
+                })
+                accumulated_text = ""
 
-                except STTError as e:
-                    _logger.error("STT error", extra={"error": str(e), "user_id": user_id})
-                    await websocket.send_json({
-                        "type": "error",
-                        "code": "STT_ERROR",
-                        "message": f"Transcription failed: {e}",
-                    })
-                except Exception as e:
-                    _logger.error("Unexpected error during transcription", extra={
-                        "error": str(e), "user_id": user_id
-                    })
-                    await websocket.send_json({
-                        "type": "error",
-                        "code": "INTERNAL_ERROR",
-                        "message": "Internal transcription error",
-                    })
-
-                audio_chunks.clear()
+                # Reset: start a new transcriber for next recording
+                transcriber_task = asyncio.create_task(_transcribe_and_forward())
 
             elif msg_type == "ping":
                 await websocket.send_json({"type": "pong"})
@@ -179,6 +193,11 @@ async def websocket_voice(
     except Exception as e:
         _logger.error("Voice WS error", extra={"error": str(e), "user_id": user_id})
     finally:
+        try:
+            transcriber_task.cancel()
+            await asyncio.shield(transcriber_task)
+        except (asyncio.CancelledError, Exception):
+            pass
         try:
             await manager.disconnect(session_id)
         except Exception:
