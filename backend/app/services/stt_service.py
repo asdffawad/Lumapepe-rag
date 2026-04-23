@@ -296,7 +296,7 @@ class DashScopeProvider(SpeechToTextProvider):
 
     async def _stream_audio(self, audio_stream):
         """
-        Internal streaming via DashScope WebSocket protocol.
+        Internal streaming via DashScope WebSocket protocol using aiohttp.
 
         Protocol flow (per official DashScope docs):
         1. Connect to wss://dashscope.aliyuncs.com/api-ws/v1/inference
@@ -307,7 +307,7 @@ class DashScopeProvider(SpeechToTextProvider):
         6. Send finish-task command
         7. Close connection
         """
-        import httpx
+        import aiohttp
 
         task_id = uuid.uuid4().hex[:32]
         ws_url = "wss://dashscope.aliyuncs.com/api-ws/v1/inference"
@@ -320,10 +320,22 @@ class DashScopeProvider(SpeechToTextProvider):
         start_time = time.monotonic()
         status = "success"
 
+        async def _send_audio(ws_conn, chunks):
+            """Send audio chunks to the WebSocket."""
+            for i, chunk in enumerate(chunks):
+                if ws_conn.closed:
+                    _logger.warning(
+                        "WebSocket closed while sending audio",
+                        extra={"task_id": task_id, "chunks_sent": i}
+                    )
+                    return
+                await ws_conn.send_bytes(chunk)
+                await asyncio.sleep(0.05)
+
         try:
-            async with httpx.AsyncClient(timeout=self.config.timeout) as client:
-                headers = {"Authorization": f"Bearer {self.config.api_key}"}
-                async with client.connect(ws_url, headers=headers) as ws:
+            headers = {"Authorization": f"Bearer {self.config.api_key}"}
+            async with aiohttp.ClientSession() as session:
+                async with session.ws_connect(ws_url, headers=headers) as ws:
                     # Step 1: Send run-task command
                     run_task_msg = {
                         "header": {
@@ -339,6 +351,7 @@ class DashScopeProvider(SpeechToTextProvider):
                             "parameters": {
                                 "format": self.config.format,
                                 "sample_rate": self.config.sample_rate,
+                                "language_hints": ["zh"],
                             },
                             "input": {}
                         }
@@ -349,50 +362,117 @@ class DashScopeProvider(SpeechToTextProvider):
 
                     # Step 2: Wait for task-started (status 200)
                     resp = await ws.receive_json()
+                    _logger.debug("DashScope response", extra={"response": resp})
                     resp_header = resp.get("header", {})
-                    if resp_header.get("status") != 200:
-                        error_msg = resp_header.get("message", "Unknown error")
-                        raise STTError(f"DashScope task start failed: {error_msg}")
+                    event_type = resp_header.get("event", "")
+                    if event_type != "task-started":
+                        error_code = resp_header.get("error_code", "UNKNOWN")
+                        error_msg = resp_header.get("error_message", "Unknown error")
+                        _logger.error(
+                            "DashScope task start failed",
+                            extra={
+                                "task_id": task_id,
+                                "event": event_type,
+                                "error_code": error_code,
+                                "error_message": error_msg,
+                                "full_response": resp,
+                            }
+                        )
+                        raise STTError(f"DashScope task start failed: {error_code} - {error_msg}")
 
                     _logger.debug("Task started successfully", extra={"task_id": task_id})
 
-                    # Step 3: Send audio chunks
-                    async for chunk in self._iter_audio(audio_stream):
-                        await ws.send_bytes(chunk)
-                        await asyncio.sleep(0.05)  # Small delay to avoid flooding
+                    # Step 3: Collect chunks then send in background while receiving results
+                    audio_chunks = [chunk async for chunk in self._iter_audio(audio_stream)]
+                    _logger.debug(
+                        "Audio chunks collected",
+                        extra={
+                            "task_id": task_id,
+                            "chunk_count": len(audio_chunks),
+                            "total_bytes": sum(len(c) for c in audio_chunks),
+                        }
+                    )
+                    send_task = asyncio.create_task(_send_audio(ws, audio_chunks))
 
-                    _logger.debug("All audio chunks sent", extra={"task_id": task_id})
-
-                    # Step 4: Receive transcription results and yield as they arrive
+                    # Step 4: Receive transcription results while audio is being sent
                     while True:
                         try:
-                            msg = await asyncio.wait_for(ws.receive_json(), timeout=5.0)
-                            header = msg.get("header", {})
-                            action = header.get("action")
+                            ws_msg = await asyncio.wait_for(ws.receive(), timeout=10.0)
 
-                            if action == "finish-task":
-                                _logger.debug("Received finish-task from server", extra={"task_id": task_id})
+                            # DashScope may send binary frames (audio acknowledgment)
+                            # alongside JSON text frames. Only process TEXT frames.
+                            if ws_msg.type == aiohttp.WSMsgType.BINARY:
+                                _logger.debug(
+                                    "Received binary frame from DashScope, skipping",
+                                    extra={"task_id": task_id, "data_len": len(ws_msg.data)}
+                                )
+                                continue
+                            if ws_msg.type != aiohttp.WSMsgType.TEXT:
+                                if ws_msg.type == aiohttp.WSMsgType.CLOSE:
+                                    _logger.debug("Connection closed by DashScope", extra={"task_id": task_id})
+                                    send_task.cancel()
+                                    break
+                                _logger.warning(
+                                    "Unexpected WebSocket frame type",
+                                    extra={"task_id": task_id, "type": ws_msg.type}
+                                )
+                                continue
+
+                            msg = ws_msg.json()
+                            header = msg.get("header", {})
+                            event_type = header.get("event", "")
+
+                            if event_type == "task-finished":
+                                _logger.debug("Received task-finished from server", extra={"task_id": task_id})
                                 break
+                            if event_type == "task-failed":
+                                send_task.cancel()
+                                error_msg = header.get("error_message", "Unknown error")
+                                raise STTError(f"DashScope task failed: {error_msg}")
 
                             # Handle result-generated events
-                            text = msg.get("payload", {}).get("choices", [{}])[0].get("text", "")
-                            if text:
-                                _logger.info(
-                                    "DashScope transcription result",
-                                    extra={"text_length": len(text), "task_id": task_id}
-                                )
-                                yield text
+                            if event_type == "result-generated":
+                                sentence = msg.get("payload", {}).get("output", {}).get("sentence", {})
+                                # Skip heartbeat events - they are just keep-alive pings, not recognition results
+                                if sentence.get("heartbeat"):
+                                    _logger.debug("Received heartbeat event, skipping", extra={"task_id": task_id})
+                                    continue
+                                text = sentence.get("text", "")
+                                if text:
+                                    _logger.info(
+                                        "DashScope transcription result",
+                                        extra={"text_length": len(text), "task_id": task_id, "end_time": sentence.get("end_time")}
+                                    )
+                                    yield text
 
                         except asyncio.TimeoutError:
-                            # No more text coming within timeout
-                            _logger.debug("No more transcription results (timeout)", extra={"task_id": task_id})
-                            break
+                            if send_task.done():
+                                _logger.debug(
+                                    "Audio sent and no more transcription results (timeout)",
+                                    extra={"task_id": task_id}
+                                )
+                                break
+                            _logger.debug("Audio still sending, waiting for results", extra={"task_id": task_id})
 
-                    # Step 5: Send finish-task command
-                    _logger.debug("Sending finish-task command", extra={"task_id": task_id})
-                    await ws.send_json({
-                        "header": {"action": "finish-task", "task_id": task_id}
-                    })
+                    # Step 5: Send finish-task command only if connection is still open
+                    if not ws.closed:
+                        _logger.debug("Sending finish-task command", extra={"task_id": task_id})
+                        try:
+                            await ws.send_json({
+                                "header": {
+                                    "action": "finish-task",
+                                    "task_id": task_id,
+                                    "streaming": "duplex"
+                                },
+                                "payload": {"input": {}}
+                            })
+                        except Exception as e:
+                            _logger.warning(
+                                "Failed to send finish-task (connection may already be closed)",
+                                extra={"task_id": task_id, "error": str(e)}
+                            )
+                    else:
+                        _logger.debug("WebSocket already closed, skipping finish-task", extra={"task_id": task_id})
 
         except STTError:
             raise
