@@ -2134,12 +2134,40 @@
         });
     }
 
+    function resampleTo16kHz(audioBuffer) {
+        const sourceRate = audioBuffer.sampleRate;
+        if (sourceRate === 16000) {
+            return audioBuffer.getChannelData(0);
+        }
+
+        const targetRate = 16000;
+        const ratio = sourceRate / targetRate;
+        const newLength = Math.round(audioBuffer.length / ratio);
+        const resampled = new Float32Array(newLength);
+
+        for (let i = 0; i < newLength; i++) {
+            const srcIdx = i * ratio;
+            const srcIdxFloor = Math.floor(srcIdx);
+            const srcIdxCeil = Math.min(Math.ceil(srcIdx), audioBuffer.length - 1);
+            const t = srcIdx - srcIdxFloor;
+            resampled[i] = (1 - t) * audioBuffer.getChannelData(0)[srcIdxFloor]
+                          + t * audioBuffer.getChannelData(0)[srcIdxCeil];
+        }
+
+        console.debug('[Voice] Resampled audio', {
+            from: sourceRate,
+            to: targetRate,
+            samples: `${audioBuffer.length} → ${newLength}`
+        });
+        return resampled;
+    }
+
     async function webmToPcmWavBase64(blob) {
         const audioContext = new AudioContext();
         const arrayBuffer = await blob.arrayBuffer();
         const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-        const pcmData = audioBuffer.getChannelData(0);
-        const sampleRate = audioBuffer.sampleRate;
+        const pcmData = resampleTo16kHz(audioBuffer);
+        const sampleRate = 16000;
         audioContext.close();
 
         const numChannels = 1;
@@ -2204,7 +2232,8 @@
             state.ws.send(JSON.stringify({
                 type: 'voice_record',
                 audio: base64,
-                format: 'pcm',
+                format: 'wav',
+                sampleRate: 16000,
             }));
         } catch (err) {
             console.error('[Voice] Audio conversion failed:', err);
