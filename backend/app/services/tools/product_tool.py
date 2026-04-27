@@ -322,8 +322,8 @@ class ProductTool(ToolBase):
             "description": spu.description,
             "category_id": spu.category_id,
             "brand_id": spu.brand_id,
-            "price": float(spu.price) / 100 if spu.price else None,  # 分转元
-            "market_price": float(spu.market_price) / 100 if spu.market_price else None,
+            "price": float(spu.price) if spu.price else None,
+            "market_price": float(spu.market_price) if spu.market_price else None,
             "stock": spu.stock,
             "sales_count": spu.sales_count,
             "pic_url": spu.pic_url,
@@ -353,7 +353,7 @@ class ProductTool(ToolBase):
         if spu:
             result["spu_name"] = spu.name
             result["spu_keyword"] = spu.keyword
-            result["spu_price"] = float(spu.price) / 100 if spu.price else None,
+            result["spu_price"] = float(spu.price) if spu.price else None,
             result["spu_pic_url"] = spu.pic_url,
         
         return result

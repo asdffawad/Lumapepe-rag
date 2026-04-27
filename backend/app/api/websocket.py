@@ -266,6 +266,7 @@ async def websocket_chat(
                     user_id=user_id,
                     audio_data=data.get("audio"),
                     format=data.get("format", "wav"),
+                    sample_rate=data.get("sampleRate"),
                 )
 
             else:
@@ -374,6 +375,8 @@ async def handle_message(
             intent=intent,
             request_id=request_id,
             user_id=user_id,
+            sku_id=sku_id,
+            spu_id=spu_id,
         ):
             if isinstance(chunk_obj, StreamChunk):
                 if chunk_obj.content:
@@ -598,6 +601,7 @@ async def handle_voice_record(
     user_id: str,
     audio_data: str | None,
     format: str = "pcm",
+    sample_rate: int | None = None,
 ) -> None:
     """
     Handle voice recording submission:
@@ -648,11 +652,11 @@ async def handle_voice_record(
         if not api_key:
             raise STTError("DASHSCOPE_API_KEY not configured")
 
-        sample_rate = data.get("sampleRate")
+        sample_rate = sample_rate if sample_rate else 16000
         stt_cfg = STTConfig(
             api_key=api_key,
             format=format,
-            sample_rate=sample_rate if sample_rate else 16000,
+            sample_rate=sample_rate,
         )
         stt = STTFactory.create("dashscope", stt_cfg)
 

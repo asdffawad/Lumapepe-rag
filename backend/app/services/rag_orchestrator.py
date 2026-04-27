@@ -88,6 +88,8 @@ class RAGOrchestrator:
         intent: str,
         request_id: str | None = None,
         user_id: str | None = None,
+        sku_id: int | None = None,
+        spu_id: int | None = None,
     ) -> RAGResult:
         """
         同步模式：完整执行 RAG 管道，返回 GenerationResult
@@ -99,7 +101,9 @@ class RAGOrchestrator:
         try:
             # Step 0: 商品检索（仅 product_qa 意图）
             if intent == "product_qa" and self._product_service:
-                product_context = await self._timed_product_search(query, total_latency)
+                product_context = await self._timed_product_search(
+                    query, total_latency, sku_id=sku_id, spu_id=spu_id
+                )
 
             # Step 1: Query 改写
             rewritten = await self._timed_rewrite(query, history, total_latency)
@@ -167,6 +171,8 @@ class RAGOrchestrator:
         intent: str,
         request_id: str | None = None,
         user_id: str | None = None,
+        sku_id: int | None = None,
+        spu_id: int | None = None,
     ) -> AsyncGenerator["StreamChunk | str", None]:
         """
         流式模式：返回 AsyncGenerator，逐字产出 StreamChunk
@@ -177,7 +183,9 @@ class RAGOrchestrator:
 
             # Step 0: 商品检索（仅 product_qa 意图）
             if intent == "product_qa" and self._product_service:
-                product_context = await self._timed_product_search(query, {"value": 0})
+                product_context = await self._timed_product_search(
+                    query, {"value": 0}, sku_id=sku_id, spu_id=spu_id
+                )
 
             # 前4步同同步模式
             rewritten = await asyncio.wait_for(
@@ -301,22 +309,38 @@ class RAGOrchestrator:
             ]
 
     async def _timed_product_search(
-        self, query: str, latency: dict
+        self, query: str, latency: dict,
+        sku_id: int | None = None,
+        spu_id: int | None = None,
     ) -> "ProductContext | None":
-        """商品检索（带超时保护）"""
+        """商品检索（带超时保护）。优先通过 sku_id/spu_id 直接查询，否则用文本搜索。"""
         start = time.monotonic()
         try:
             if not self._product_service:
                 return None
 
-            result = await asyncio.wait_for(
-                self._product_service.search_product(query),
-                timeout=self._config.retrieve_timeout_ms / 1000,
-            )
+            # 优先通过 ID 直接查询（当用户从商品详情页进入时，ID 已确定）
+            if sku_id is not None:
+                detail = await asyncio.wait_for(
+                    self._product_service.get_sku_detail(sku_id),
+                    timeout=self._config.retrieve_timeout_ms / 1000,
+                )
+            elif spu_id is not None:
+                detail = await asyncio.wait_for(
+                    self._product_service.get_spu_detail(spu_id),
+                    timeout=self._config.retrieve_timeout_ms / 1000,
+                )
+            else:
+                # 兜底：文本搜索
+                detail = await asyncio.wait_for(
+                    self._product_service.search_product(query),
+                    timeout=self._config.retrieve_timeout_ms / 1000,
+                )
+                detail = detail.detail if detail else None
+
             latency["value"] += int((time.monotonic() - start) * 1000)
 
-            if result and result.detail:
-                detail = result.detail
+            if detail:
                 product_name = ""
                 product_detail = ""
 
@@ -330,7 +354,7 @@ class RAGOrchestrator:
                             props = json.loads(detail.spu.properties) if isinstance(detail.spu.properties, str) else detail.spu.properties
                         except Exception:
                             pass
-                    product_detail = f"{detail.spu.name or ''} | 价格: ¥{detail.spu.price or 0:.2f}"
+                    product_detail = f"{detail.spu.name or ''} | 价格: ${float(detail.spu.price or 0):.2f}"
                     if props:
                         key_props = [f"{k}: {v}" for k, v in props.items() if k in ("规格", "颜色", "内存", "存储")]
                         if key_props:
@@ -339,8 +363,8 @@ class RAGOrchestrator:
                 return ProductContext(
                     product_name=product_name,
                     product_detail=product_detail,
-                    match_type=result.resolve_result.match_type.value if result.resolve_result else "",
-                    confidence=result.resolve_result.confidence if result.resolve_result else 0.0,
+                    match_type="spu_id" if spu_id else ("sku_id" if sku_id else "text_search"),
+                    confidence=1.0 if (sku_id or spu_id) else 0.0,
                 )
             return None
         except asyncio.TimeoutError:

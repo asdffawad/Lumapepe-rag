@@ -33,7 +33,7 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
 
 from app.models.request import DocumentCreateRequest, DocumentUpdateRequest
 

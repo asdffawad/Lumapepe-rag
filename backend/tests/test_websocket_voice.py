@@ -24,6 +24,7 @@ class TestVoiceRecordHandler:
         assert "user_id" in params
         assert "audio_data" in params
         assert "format" in params
+        assert "sample_rate" in params
 
     def test_voice_record_handler_returns_none(self):
         """Verify handle_voice_record has None return type annotation."""

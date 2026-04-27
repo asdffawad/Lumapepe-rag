@@ -82,6 +82,20 @@ async def lifespan(app: FastAPI):
     # 初始化 LLM
     llm = LLMFactory.create(config.llm.provider, config.llm)
 
+    # 初始化商品检索模块（需在 Orchestrator 之前创建）
+    from app.etl.dict_loader import ProductDictLoader
+    from app.services.product_service import ProductService
+
+    dict_loader = ProductDictLoader(
+        dict_path=config.product.dict_path,
+        reload_interval_seconds=config.product.reload_interval_seconds,
+    )
+
+    product_service = ProductService(
+        dict_loader=dict_loader,
+        max_batch_size=config.product.max_batch_size,
+    )
+
     # 初始化向量数据库（Milvus 或 Qdrant）
     vector_client = None
     vector_type = None
@@ -141,6 +155,7 @@ async def lifespan(app: FastAPI):
         prompt_builder=prompt_builder,
         generator=generator,
         config=config.rag,
+        product_service=product_service,
     )
     app.state.orchestrator = orchestrator
 
@@ -151,19 +166,6 @@ async def lifespan(app: FastAPI):
         intent_classifier = HybridIntentClassifier(llm)
     app.state.intent_classifier = intent_classifier
 
-    # 初始化商品检索模块
-    from app.etl.dict_loader import ProductDictLoader
-    from app.services.product_service import ProductService
-
-    dict_loader = ProductDictLoader(
-        dict_path=config.product.dict_path,
-        reload_interval_seconds=config.product.reload_interval_seconds,
-    )
-
-    product_service = ProductService(
-        dict_loader=dict_loader,
-        max_batch_size=config.product.max_batch_size,
-    )
     app.state.product_service = product_service
 
     # 注册API路由

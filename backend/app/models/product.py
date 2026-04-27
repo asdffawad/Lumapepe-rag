@@ -96,9 +96,9 @@ class SpuInfo:
     slider_pic_urls: Optional[str] = None  # 轮播图，逗号分隔
     status: Optional[int] = None  # 1上架 0下架
     spec_type: Optional[bool] = None  # 0单规格 1多规格
-    price: Optional[float] = None  # 单位：分
-    market_price: Optional[float] = None  # 单位：分
-    cost_price: Optional[float] = None  # 单位：分
+    price: Optional[float] = None
+    market_price: Optional[float] = None  # 单位：美元
+    cost_price: Optional[float] = None
     stock: Optional[int] = None
     sales_count: Optional[int] = None
     virtual_sales_count: Optional[int] = None

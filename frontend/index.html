@@ -234,6 +234,49 @@
             gap: 16px;
         }
 
+        .product-card {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            background: rgba(255,255,255,0.08);
+            border: 1px solid rgba(255,255,255,0.12);
+            border-radius: 10px;
+            padding: 8px 12px;
+        }
+        .product-card img {
+            width: 36px;
+            height: 36px;
+            object-fit: cover;
+            border-radius: 6px;
+            flex-shrink: 0;
+        }
+        .product-card-info {
+            flex: 1;
+            min-width: 0;
+        }
+        .product-card-name {
+            font-size: 12px;
+            font-weight: 600;
+            color: white;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+        .product-card-meta {
+            font-size: 10px;
+            color: rgba(255,255,255,0.5);
+            margin-top: 1px;
+        }
+        .product-card-tag {
+            flex-shrink: 0;
+            background: var(--accent);
+            color: white;
+            font-size: 9px;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+        }
+
         .chat-avatar {
             width: 48px;
             height: 48px;
@@ -929,6 +972,7 @@
                         <div class="chat-stat-label">在线时长</div>
                     </div>
                 </div>
+                <div class="product-card" id="productCard" style="display:none;margin-left:auto;margin-right:16px;max-width:280px"></div>
             </div>
 
             <div class="chat-messages" id="chatMessages">
@@ -1678,6 +1722,49 @@
         state.lastPongTime = Date.now();
         clearTimeout(state.pongTimer);
         updateStats();
+    }
+
+    function addProductCard(product) {
+        const card = document.getElementById('productCard');
+        if (!card) return;
+        card.innerHTML = '';
+
+        if (product.pic_url || product.sku_pic_url) {
+            const img = document.createElement('img');
+            img.src = product.pic_url || product.sku_pic_url;
+            img.alt = '';
+            img.onerror = () => { img.style.display = 'none'; };
+            card.appendChild(img);
+        }
+
+        const info = document.createElement('div');
+        info.className = 'product-card-info';
+
+        const name = document.createElement('div');
+        name.className = 'product-card-name';
+        name.textContent = product.product_name || product.name || '';
+        info.appendChild(name);
+
+        const meta = document.createElement('div');
+        meta.className = 'product-card-meta';
+        const parts = [];
+        if (product.price != null) parts.push('$' + product.price.toFixed(2));
+        else if (product.sku_price != null) parts.push('$' + product.sku_price.toFixed(2));
+        if (product.stock != null) parts.push('库存: ' + product.stock);
+        else if (product.sku_stock != null) parts.push('库存: ' + product.sku_stock);
+        const idLabel = product.sku_id || product.spu_id;
+        if (idLabel) parts.push('#' + idLabel);
+        meta.textContent = parts.join(' · ');
+        info.appendChild(meta);
+
+        card.appendChild(info);
+
+        const tag = document.createElement('div');
+        tag.className = 'product-card-tag';
+        tag.textContent = product.product_type === 'SKU' ? 'SKU' : 'SPU';
+        card.appendChild(tag);
+
+        card.style.display = 'flex';
     }
 
     function escapeHtml(text) {

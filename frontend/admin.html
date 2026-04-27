@@ -1288,60 +1288,6 @@ const RequestLogger = {
     }
 };
 
-// ==================== 增强的 API 函数 ====================
-async function apiFetch(url, options = {}) {
-    const requestId = 'req_' + Date.now() + '_' + Math.random().toString(36).substr(2, 6);
-    const startTime = Date.now();
-    const fullUrl = url.startsWith('http') ? url : API_CONFIG.BASE_URL + url;
-    const method = options.method || 'GET';
-
-    RequestLogger.add({
-        id: requestId, method, url: fullUrl, status: 0, type: 'http',
-        request: { headers: options.headers || {}, body: options.body ? JSON.parse(options.body) : null }
-    });
-
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), API_CONFIG.TIMEOUT);
-
-    try {
-        const response = await fetch(fullUrl, { ...options, signal: controller.signal });
-        clearTimeout(timeoutId);
-        const duration = Date.now() - startTime;
-        let body;
-        const contentType = response.headers.get('content-type');
-        if (contentType && contentType.includes('application/json')) {
-            body = await response.json();
-        } else {
-            body = await response.text();
-        }
-
-        RequestLogger.update(requestId, { status: response.status, duration, response: { headers: Object.fromEntries(response.headers.entries()), body } });
-        console.debug(`[API] ${method} ${url}`, { status: response.status, duration: duration + 'ms', data: body });
-        return { ok: response.ok, status: response.status, data: body };
-
-    } catch (error) {
-        clearTimeout(timeoutId);
-        const duration = Date.now() - startTime;
-        if (API_CONFIG.RETRY_ENABLED && API_CONFIG.RETRY_CONFIG.retryOn.includes(0) && API_CONFIG.RETRY_CONFIG.maxRetries > 0) {
-            console.debug(`[API] Retrying ${url}...`);
-            await new Promise(r => setTimeout(r, API_CONFIG.RETRY_CONFIG.retryDelay));
-            return apiFetch(url, options);
-        }
-        RequestLogger.update(requestId, { status: 0, duration, error: error.message });
-        console.debug(`[API Error] ${method} ${url}`, { error: error.message });
-        return { ok: false, status: 0, error: error.message };
-    }
-}
-
-// 简化的 GET/POST 包装函数（保持向后兼容）
-async function apiGet(url) {
-    return apiFetch(url, { method: 'GET' });
-}
-
-async function apiPost(url, body) {
-    return apiFetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body || {}) });
-}
-
 // ==================== 调试面板控制 ====================
 function toggleDebugPanel() {
     const panel = document.getElementById('debugPanel');
@@ -1362,6 +1308,16 @@ function showToast(msg, type = 'info') {
   el.textContent = msg; el.className = 'toast show ' + type;
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => { el.className = 'toast'; }, 3500);
+}
+
+async function apiFetch(url, options = {}) {
+  try {
+    const r = await fetch(url, options);
+    const text = await r.text();
+    if (!r.ok) return { ok: false, status: r.status, msg: text.slice(0, 300) };
+    try { return { ok: true, data: JSON.parse(text) }; }
+    catch { return { ok: true, data: text }; }
+  } catch(e) { return { ok: false, status: 0, msg: e.message }; }
 }
 
 async function apiGet(url) {
@@ -1656,19 +1612,18 @@ async function doUpload() {
   formData.append('doc_type', getSelectedDocType());
 
   try {
-    bar.style.width = '30%';
-    pct.textContent = '30%';
-    statusEl.textContent = '上传并解析中...';
+    statusEl.textContent = '上传中...';
+    const pct = document.getElementById('progress-text');
+    const bar = document.getElementById('progress-bar');
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', API_CONFIG.ENDPOINTS.DOCUMENT_UPLOAD);
 
-    // 进度监听（XHR 原生支持上传进度）
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
-        const pct2 = Math.round(30 + (e.loaded / e.total) * 40);
-        bar.style.width = pct2 + '%';
-        pct.textContent = pct2 + '%';
+        const p = Math.round((e.loaded / e.total) * 100);
+        bar.style.width = p + '%';
+        pct.textContent = p + '%';
       }
     };
 

@@ -42,7 +42,7 @@ SYSTEM_TEMPLATES: dict[str, str] = {
 - 只基于知识库内容回答，不要编造信息
 - 如知识库中没有相关信息，请明确告知用户"暂无该信息，建议您联系在线客服"
 - 回答要专业、友好、简洁
-- 涉及价格时，注意单位（元/人民币）""",
+- 涉及价格时，单位为美元""",
 
     "order_query": """你是一位电商订单客服，请根据订单信息准确回答用户关于订单状态、物流进度、收货地址等问题。
 
@@ -541,8 +541,13 @@ class MockPromptBuilder(PromptBuilder):
         if tool_result is not None:
             tool_info = f"\n[Tool: {tool_result.source}]"
         product_info = ""
-        if product_context and product_context.get("product_name"):
-            product_info = f"\n[Product: {product_context.get('product_name', '')}]"
+        # Handle both dict (real PromptBuilder) and ProductContext dataclass (orchestrator)
+        if product_context:
+            name = getattr(product_context, 'product_name', None) or (
+                product_context.get('product_name') if hasattr(product_context, 'get') else None
+            )
+            if name:
+                product_info = f"\n[Product: {name}]"
         return Prompt(
             system=DEFAULT_SYSTEM,
             user=f"Query: {query}\nContext: {len(context)} docs{tool_info}{product_info}",

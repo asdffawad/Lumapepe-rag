@@ -17,6 +17,8 @@ import uuid
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
+import httpx
+
 from app.logging_config import get_logger
 from app import metrics as _metrics
 
@@ -300,12 +302,13 @@ class DashScopeProvider(SpeechToTextProvider):
 
         Protocol flow (per official DashScope docs):
         1. Connect to wss://dashscope.aliyuncs.com/api-ws/v1/inference
-        2. Send run-task JSON command with task_id
-        3. Wait for task-started event (status 200)
-        4. Stream binary audio chunks
-        5. Receive result-generated events with transcription text
-        6. Send finish-task command
-        7. Close connection
+        2. Collect audio and detect format (WAV vs raw PCM)
+        3. Send run-task JSON command with detected format/sample_rate
+        4. Wait for task-started event (status 200)
+        5. Stream binary audio chunks
+        6. Receive result-generated events with transcription text
+        7. Send finish-task command
+        8. Close connection
         """
         import aiohttp
 
@@ -336,7 +339,43 @@ class DashScopeProvider(SpeechToTextProvider):
             headers = {"Authorization": f"Bearer {self.config.api_key}"}
             async with aiohttp.ClientSession() as session:
                 async with session.ws_connect(ws_url, headers=headers) as ws:
-                    # Step 1: Send run-task command
+                    # Step 3: Collect audio and detect format BEFORE sending run-task
+                    audio_chunks = [chunk async for chunk in self._iter_audio(audio_stream)]
+                    audio_bytes = b''.join(audio_chunks)
+                    total_bytes = len(audio_bytes)
+
+                    # Detect WAV: if first 4 bytes are RIFF, use raw WAV bytes with detected sample rate
+                    audio_format = self.config.format
+                    effective_sample_rate = self.config.sample_rate
+                    if audio_bytes[:4] == b'RIFF':
+                        audio_format = "wav"
+                        try:
+                            _, detected_sr = self._parse_wav(audio_bytes)
+                            effective_sample_rate = detected_sr
+                            _logger.info(
+                                "Detected WAV audio, will send raw WAV bytes",
+                                extra={
+                                    "task_id": task_id,
+                                    "detected_sample_rate": detected_sr,
+                                    "original_bytes": total_bytes,
+                                }
+                            )
+                        except ValueError as e:
+                            _logger.warning(
+                                "Failed to parse WAV header, using default sample rate",
+                                extra={"task_id": task_id, "error": str(e)},
+                            )
+                    else:
+                        _logger.debug(
+                            "Audio chunks collected",
+                            extra={
+                                "task_id": task_id,
+                                "chunk_count": len(audio_chunks),
+                                "total_bytes": total_bytes,
+                            }
+                        )
+
+                    # Step 4: Send run-task with actual detected format and sample rate
                     run_task_msg = {
                         "header": {
                             "action": "run-task",
@@ -349,8 +388,8 @@ class DashScopeProvider(SpeechToTextProvider):
                             "function": "recognition",
                             "model": self.config.model,
                             "parameters": {
-                                "format": self.config.format,
-                                "sample_rate": self.config.sample_rate,
+                                "format": audio_format,
+                                "sample_rate": effective_sample_rate,
                                 "language_hints": ["zh"],
                             },
                             "input": {}
@@ -360,7 +399,7 @@ class DashScopeProvider(SpeechToTextProvider):
                     _logger.debug("Sending run-task message", extra={"task_id": task_id})
                     await ws.send_json(run_task_msg)
 
-                    # Step 2: Wait for task-started (status 200)
+                    # Step 5: Wait for task-started (status 200)
                     resp = await ws.receive_json()
                     _logger.debug("DashScope response", extra={"response": resp})
                     resp_header = resp.get("header", {})
@@ -382,19 +421,10 @@ class DashScopeProvider(SpeechToTextProvider):
 
                     _logger.debug("Task started successfully", extra={"task_id": task_id})
 
-                    # Step 3: Collect chunks then send in background while receiving results
-                    audio_chunks = [chunk async for chunk in self._iter_audio(audio_stream)]
-                    _logger.debug(
-                        "Audio chunks collected",
-                        extra={
-                            "task_id": task_id,
-                            "chunk_count": len(audio_chunks),
-                            "total_bytes": sum(len(c) for c in audio_chunks),
-                        }
-                    )
+                    # Step 6: Send audio chunks in background while receiving results
                     send_task = asyncio.create_task(_send_audio(ws, audio_chunks))
 
-                    # Step 4: Receive transcription results while audio is being sent
+                    # Step 7: Receive transcription results while audio is being sent
                     while True:
                         try:
                             ws_msg = await asyncio.wait_for(ws.receive(), timeout=10.0)
@@ -412,6 +442,14 @@ class DashScopeProvider(SpeechToTextProvider):
                                     _logger.debug("Connection closed by DashScope", extra={"task_id": task_id})
                                     send_task.cancel()
                                     break
+                                # Handle ping/pong from DashScope server
+                                if ws_msg.type == aiohttp.WSMsgType.PING:
+                                    _logger.debug("Received PING from DashScope, responding with PONG", extra={"task_id": task_id})
+                                    await ws.pong()
+                                    continue
+                                if ws_msg.type == aiohttp.WSMsgType.PONG:
+                                    _logger.debug("Received PONG from DashScope", extra={"task_id": task_id})
+                                    continue
                                 _logger.warning(
                                     "Unexpected WebSocket frame type",
                                     extra={"task_id": task_id, "type": ws_msg.type}
@@ -454,7 +492,7 @@ class DashScopeProvider(SpeechToTextProvider):
                                 break
                             _logger.debug("Audio still sending, waiting for results", extra={"task_id": task_id})
 
-                    # Step 5: Send finish-task command only if connection is still open
+                    # Step 8: Send finish-task command only if connection is still open
                     if not ws.closed:
                         _logger.debug("Sending finish-task command", extra={"task_id": task_id})
                         try:
@@ -496,3 +534,58 @@ class DashScopeProvider(SpeechToTextProvider):
         else:
             for chunk in audio_stream:
                 yield chunk
+
+    def _parse_wav(self, audio_bytes: bytes) -> tuple[bytes, int]:
+        """
+        Parse WAV audio bytes and extract raw PCM data.
+
+        Returns (pcm_data, sample_rate).
+        Raises ValueError if not a valid WAV file.
+        """
+        if len(audio_bytes) < 44:
+            raise ValueError(f"Audio data too short for WAV header: {len(audio_bytes)} bytes")
+
+        riff = audio_bytes[:4]
+        wave = audio_bytes[8:12]
+        if riff != b'RIFF' or wave != b'WAVE':
+            raise ValueError(f"Not a valid WAV file: riff={riff!r}, wave={wave!r}")
+
+        offset = 12
+        sample_rate = self.config.sample_rate
+        num_channels = 1
+        bits_per_sample = 16
+
+        while offset < len(audio_bytes) - 8:
+            chunk_id = audio_bytes[offset:offset + 4]
+            chunk_size = int.from_bytes(audio_bytes[offset + 4:offset + 8], 'little')
+
+            if chunk_id == b'fmt ':
+                fmt_data = audio_bytes[offset + 8:offset + 8 + chunk_size]
+                if len(fmt_data) >= 16:
+                    audio_format = int.from_bytes(fmt_data[0:2], 'little')
+                    num_channels = int.from_bytes(fmt_data[2:4], 'little')
+                    sample_rate = int.from_bytes(fmt_data[4:8], 'little')
+                    block_align = int.from_bytes(fmt_data[12:14], 'little')
+                    bits_per_sample = int.from_bytes(fmt_data[14:16], 'little')
+                    if audio_format != 1:
+                        raise ValueError(
+                            f"WAV audio format {audio_format} not supported "
+                            f"(only PCM format 1 is supported)"
+                        )
+                offset += 8 + chunk_size
+            elif chunk_id == b'data':
+                pcm_data = audio_bytes[offset + 8:offset + 8 + chunk_size]
+                _logger.debug(
+                    "WAV parsed",
+                    extra={
+                        "sample_rate": sample_rate,
+                        "channels": num_channels,
+                        "bits_per_sample": bits_per_sample,
+                        "pcm_bytes": len(pcm_data),
+                    }
+                )
+                return pcm_data, sample_rate
+            else:
+                offset += 8 + chunk_size
+
+        raise ValueError("WAV file has no data chunk")

@@ -161,6 +161,8 @@ class QdrantClient:
             }
             distance = distance_map.get(self.config.distance, "Cosine")
 
+            from qdrant_client.models import SparseVectorParams
+
             client.create_collection(
                 collection_name=self.config.collection_name,
                 vectors_config={
@@ -168,6 +170,9 @@ class QdrantClient:
                         size=self.config.vector_dim,
                         distance=distance,
                     )
+                },
+                sparse_vectors_config={
+                    "sparse": SparseVectorParams(),
                 },
                 optimizers_config={
                     "indexing_threshold": 10000,
@@ -350,31 +355,26 @@ class QdrantClient:
 
             prefetch = [
                 Prefetch(
-                    prefetch=[
-                        Prefetch(
-                            query=query_vector,
-                            filter=q_filter,
-                            limit=top_k * 3,
-                        ),
-                        Prefetch(
-                            query=SparseVector(
-                                indices=list(query_sparse_vector.keys()),
-                                values=list(query_sparse_vector.values()),
-                            ),
-                            filter=q_filter,
-                            limit=top_k * 3,
-                        ),
-                    ],
-                    fusion=fusion_type,
-                )
+                    query=query_vector,
+                    filter=q_filter,
+                    limit=top_k * 3,
+                ),
+                Prefetch(
+                    query=SparseVector(
+                        indices=list(query_sparse_vector.keys()),
+                        values=list(query_sparse_vector.values()),
+                    ),
+                    filter=q_filter,
+                    limit=top_k * 3,
+                ),
             ]
 
             results = client.query_points(
                 collection_name=self.config.collection_name,
                 query=query_vector,
-                query_filter=q_filter,
                 limit=top_k,
                 prefetch=prefetch,
+                fusion=fusion_type,
                 with_payload=True,
                 with_vectors=False,
             )
@@ -503,7 +503,8 @@ class QdrantClient:
             client = self._get_client()
             from qdrant_client.models import Filter, FieldCondition, MatchValue, FilterSelector
 
-            points = client.scroll(
+            # scroll 只取 id，不取 payload/vector，最小化传输
+            points, _ = client.scroll(
                 collection_name=self.config.collection_name,
                 scroll_filter=Filter(
                     must=[
@@ -516,37 +517,27 @@ class QdrantClient:
                 limit=10000,
                 with_payload=False,
                 with_vectors=False,
-            )[0]
-
-            if points:
-                client.delete(
-                    collection_name=self.config.collection_name,
-                    points_selector=FilterSelector(
-                        filter=Filter(
-                            must=[
-                                FieldCondition(
-                                    key="doc_id",
-                                    match=MatchValue(value=doc_id),
-                                )
-                            ]
-                        )
-                    ),
-                    wait=True,
-                )
-
-            count_info = client.count(
-                collection_name=self.config.collection_name,
-                count_filter=Filter(
-                    must=[
-                        FieldCondition(
-                            key="doc_id",
-                            match=MatchValue(value=doc_id),
-                        )
-                    ]
-                ),
             )
-            deleted = len(points)
-            return deleted
+
+            if not points:
+                return 0
+
+            # 直接用 filter delete，无需先 scroll 再逐 ID 删除
+            client.delete(
+                collection_name=self.config.collection_name,
+                points_selector=FilterSelector(
+                    filter=Filter(
+                        must=[
+                            FieldCondition(
+                                key="doc_id",
+                                match=MatchValue(value=doc_id),
+                            )
+                        ]
+                    )
+                ),
+                wait=True,
+            )
+            return len(points)
 
         return await loop.run_in_executor(None, _do_delete)
 
@@ -665,6 +656,7 @@ class QdrantClient:
                 }
                 distance = distance_map.get(self.config.distance, "Cosine")
                 try:
+                    from qdrant_client.models import SparseVectorParams
                     client.create_collection(
                         collection_name=self.config.collection_name,
                         vectors_config={
@@ -672,6 +664,9 @@ class QdrantClient:
                                 size=self.config.vector_dim,
                                 distance=distance,
                             )
+                        },
+                        sparse_vectors_config={
+                            "sparse": SparseVectorParams(),
                         },
                         optimizers_config={
                             "indexing_threshold": 10000,
@@ -714,20 +709,22 @@ def _build_filter(filters: dict) -> Any:
 
     conditions: list = []
 
-    # 顶层组合：must / should / must_not
+    # 顶层组合：must / should / must_not（与简写形式可同时生效）
     if "must" in filters:
         for cond in filters["must"]:
             conditions.append(_parse_condition(cond))
-    elif "should" in filters:
+    if "should" in filters:
         should_conditions = [_parse_condition(c) for c in filters["should"]]
         conditions.append(Should(should=should_conditions, min_should_match=1))
-    elif "must_not" in filters:
+    if "must_not" in filters:
         for cond in filters["must_not"]:
             conditions.append(_parse_condition(cond))
 
-    # 简写形式：直接传字段值
+    # 简写形式：直接传字段值（跳过顶层组合 key）
     if not conditions:
         for key, value in filters.items():
+            if key in ("must", "should", "must_not"):
+                continue
             if isinstance(value, str):
                 conditions.append(
                     FieldCondition(key=key, match=MatchValue(value=value))

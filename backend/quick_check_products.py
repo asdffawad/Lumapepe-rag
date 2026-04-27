@@ -33,7 +33,7 @@ async def main():
             print(f"\n[可用的SPU示例]")
             for i, spu in enumerate(spus[:3], 1):
                 print(f"  {i}. ID: {spu.id}, 名称: {spu.name[:50]}")
-                print(f"     价格: ${spu.price/100 if spu.price else 'N/A'}, 库存: {spu.stock}")
+                print(f"     价格: ${spu.price if spu.price else 'N/A'}, 库存: {spu.stock}")
 
         # 查询SKU统计
         skus = await repo.get_all_sku()
