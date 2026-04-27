@@ -66,3 +66,5 @@ celerybeat.pid
 .agents/
 .cursor/
 .playwright-mcp/
+rag-deploy.tar.gz
+rag-images.tar

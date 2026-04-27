@@ -503,6 +503,9 @@ class QdrantClient:
             client = self._get_client()
             from qdrant_client.models import Filter, FieldCondition, MatchValue, FilterSelector
 
+            if not client.collection_exists(self.config.collection_name):
+                return 0
+
             # scroll 只取 id，不取 payload/vector，最小化传输
             points, _ = client.scroll(
                 collection_name=self.config.collection_name,
