@@ -502,30 +502,31 @@ class QdrantClient:
         def _do_delete():
             client = self._get_client()
             from qdrant_client.models import Filter, FieldCondition, MatchValue, FilterSelector
+            from qdrant_client.http.exceptions import UnexpectedResponse
 
-            if not client.collection_exists(self.config.collection_name):
-                return 0
-
-            # scroll 只取 id，不取 payload/vector，最小化传输
-            points, _ = client.scroll(
-                collection_name=self.config.collection_name,
-                scroll_filter=Filter(
-                    must=[
-                        FieldCondition(
-                            key="doc_id",
-                            match=MatchValue(value=doc_id),
-                        )
-                    ]
-                ),
-                limit=10000,
-                with_payload=False,
-                with_vectors=False,
-            )
+            try:
+                points, _ = client.scroll(
+                    collection_name=self.config.collection_name,
+                    scroll_filter=Filter(
+                        must=[
+                            FieldCondition(
+                                key="doc_id",
+                                match=MatchValue(value=doc_id),
+                            )
+                        ]
+                    ),
+                    limit=10000,
+                    with_payload=False,
+                    with_vectors=False,
+                )
+            except UnexpectedResponse as e:
+                if e.status_code == 404:
+                    return 0
+                raise
 
             if not points:
                 return 0
 
-            # 直接用 filter delete，无需先 scroll 再逐 ID 删除
             client.delete(
                 collection_name=self.config.collection_name,
                 points_selector=FilterSelector(
