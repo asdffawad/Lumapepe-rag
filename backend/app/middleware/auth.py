@@ -280,36 +280,6 @@ async def get_current_user(request: Request) -> AuthUser:
     if request.url.path in skip_paths or request.url.path.startswith("/docs"):
         return AuthUser(user_id="anonymous", role="guest")
 
-    # 管理员端点检查
-    admin_paths = {
-        "/api/v1/admin/ingest",
-        "/api/v1/admin/documents",
-    }
-    if request.url.path in admin_paths:
-        # 检查管理员认证
-        admin_key = _extract_admin_key(request)
-        if admin_key and verify_admin_key(admin_key):
-            return AuthUser(user_id="admin", role="admin")
-
-        # 检查 JWT 是否具有 admin 角色
-        token = _extract_bearer_token(request)
-        if token:
-            try:
-                user = decode_token(token)
-                if user.role == "admin":
-                    return user
-            except JWTError:
-                pass
-
-        # 管理员端点无认证
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail={
-                "code": "ADMIN_REQUIRED",
-                "message": "管理员权限认证失败，请提供有效的 X-Admin-Key 或使用 admin 角色的 JWT"
-            },
-        )
-
     # 1. 尝试 JWT
     token = _extract_bearer_token(request)
     if token:
@@ -337,6 +307,56 @@ async def get_current_user(request: Request) -> AuthUser:
     raise HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail={"code": "UNAUTHORIZED", "message": "请提供 Authorization: Bearer <token> 或 X-API-Key"},
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+
+
+async def get_admin_user(request: Request) -> AuthUser:
+    """
+    FastAPI 依赖：admin 专属鉴权，同时支持 JWT Bearer Token 和 Admin API Key。
+
+    支持的认证方式（优先级依次）：
+    1. X-Admin-Key: <key> — 验证管理员 API Key
+    2. Authorization: Bearer <token> — 验证 JWT，role 必须为 "admin"
+
+    Raises:
+        HTTPException 401: 未提供认证信息或 Token 无效
+        HTTPException 403: Token 有效但非 admin 角色
+    """
+    # 1. 尝试 Admin API Key
+    admin_key = _extract_admin_key(request)
+    if admin_key and verify_admin_key(admin_key):
+        return AuthUser(user_id="admin", role="admin")
+
+    # 2. 尝试 JWT Bearer Token
+    token = _extract_bearer_token(request)
+    if token:
+        try:
+            user = decode_token(token)
+        except JWTError as e:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail={"code": "INVALID_TOKEN", "message": str(e)},
+                headers={"WWW-Authenticate": "Bearer"},
+            )
+
+        if user.role != "admin":
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail={
+                    "code": "ADMIN_REQUIRED",
+                    "message": "此接口需要 admin 权限"
+                },
+            )
+        return user
+
+    # 3. 均未提供
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail={
+            "code": "UNAUTHORIZED",
+            "message": "请提供 Authorization: Bearer <token> 或 X-Admin-Key"
+        },
         headers={"WWW-Authenticate": "Bearer"},
     )
 
@@ -460,12 +480,23 @@ def extract_bearer_from_headers(headers: dict) -> str | None:
     if auth.startswith("bearer "):
         return auth[7:].strip()
 
-    # 方式2: Sec-WebSocket-Protocol
+    # 方式2: Sec-WebSocket-Protocol: bearer, <token>
+    # 浏览器 new WebSocket(url, ['bearer', token]) 发送: Sec-WebSocket-Protocol: bearer, <token>
+    # Starlette 可能将其解析为列表 ['bearer', token]，也可能是字符串 'bearer, <token>'
     protocol = headers.get("sec-websocket-protocol", "") or headers.get("Sec-WebSocket-Protocol", "")
-    if protocol.startswith("bearer,"):
-        return protocol[7:].strip()
-    if protocol.startswith("bearer "):
-        return protocol[7:].strip()
+    if isinstance(protocol, list):
+        # Starlette 解析为列表格式
+        vals = protocol
+    else:
+        # 字符串格式，按逗号+空格分割
+        vals = [v.strip() for v in protocol.split(",")]
+    # 找 'bearer' 子协议，其后紧跟的元素即为 token
+    try:
+        idx = vals.index("bearer")
+        if idx + 1 < len(vals):
+            return vals[idx + 1]
+    except (ValueError, AttributeError):
+        pass
 
     return None
 

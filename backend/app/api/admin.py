@@ -73,7 +73,10 @@ router = APIRouter(prefix="/api/v1/admin", tags=["admin"])
 
 
 @router.post("/ingest")
-async def trigger_ingest(reset: bool = False):
+async def trigger_ingest(
+    reset: bool = False,
+    current_user: AuthUser = Depends(get_admin_user),
+):
     script_path = SCRIPT_DIR / "ingest_data.py"
 
     cmd = [sys.executable, str(script_path)]
@@ -122,7 +125,7 @@ async def trigger_ingest(reset: bool = False):
 
 
 @router.get("/documents")
-async def list_documents():
+async def list_documents(current_user: AuthUser = Depends(get_admin_user)):
     """
     查看所有已摄取的文档状态
     """
@@ -159,7 +162,10 @@ async def list_documents():
 
 
 @router.get("/documents/{doc_id}")
-async def get_document(doc_id: int):
+async def get_document(
+    doc_id: int,
+    current_user: AuthUser = Depends(get_admin_user),
+):
     """查看指定文档详情"""
     from app.database.connection import get_db_pool
 
@@ -183,7 +189,10 @@ async def get_document(doc_id: int):
 
 
 @router.post("/documents/{doc_id}/reindex")
-async def reindex_document(doc_id: int):
+async def reindex_document(
+    doc_id: int,
+    current_user: AuthUser = Depends(get_admin_user),
+):
     """
     重新索引指定文档：
     1. 从 Qdrant 删除该 doc_id 的所有向量 chunk
@@ -272,7 +281,10 @@ async def reindex_document(doc_id: int):
 
 
 @router.post("/documents")
-async def create_document(request: DocumentCreateRequest):
+async def create_document(
+    request: DocumentCreateRequest,
+    current_user: AuthUser = Depends(get_admin_user),
+):
     """
     创建新文档并自动摄取到向量库。
 
@@ -359,6 +371,7 @@ async def create_document(request: DocumentCreateRequest):
 async def upload_document(
     file: UploadFile = File(...),
     doc_type: str = Form("policy"),
+    current_user: AuthUser = Depends(get_admin_user),
 ):
     """
     上传并摄取文件（PDF / DOCX / HTML）。
@@ -496,7 +509,11 @@ async def upload_document(
 
 
 @router.put("/documents/{doc_id}")
-async def update_document(doc_id: int, request: DocumentUpdateRequest):
+async def update_document(
+    doc_id: int,
+    request: DocumentUpdateRequest,
+    current_user: AuthUser = Depends(get_admin_user),
+):
     """
     更新文档内容并自动重索引。
 
@@ -589,7 +606,10 @@ async def update_document(doc_id: int, request: DocumentUpdateRequest):
 
 
 @router.delete("/documents/{doc_id}")
-async def delete_document(doc_id: int):
+async def delete_document(
+    doc_id: int,
+    current_user: AuthUser = Depends(get_admin_user),
+):
     """
     删除指定文档：删除 Qdrant 向量 + MySQL 记录（软删除）。
     删除后可通过重新 POST 创建同名文档。
@@ -634,7 +654,11 @@ async def delete_document(doc_id: int):
 
 
 @router.post("/ingest/incremental")
-async def trigger_incremental_ingest(dry_run: bool = False, delete_missing: bool = True):
+async def trigger_incremental_ingest(
+    dry_run: bool = False,
+    delete_missing: bool = True,
+    current_user: AuthUser = Depends(get_admin_user),
+):
     """
     增量摄取 API：
     - 扫描 data/ 目录，对比 MySQL records
@@ -736,12 +760,14 @@ async def trigger_incremental_ingest(dry_run: bool = False, delete_missing: bool
 # ============ WebSocket 连接管理（调试工具）============
 
 from fastapi import Depends, Request
-from app.middleware.auth import get_current_user, AuthUser
+from app.middleware.auth import get_current_user, get_admin_user, AuthUser
 from app.api.ws_manager import get_connection_manager, reset_connection_manager
 
 
 @router.get("/ws/connections")
-async def list_connections(current_user: AuthUser = Depends(get_current_user)):
+async def list_connections(
+    current_user: AuthUser = Depends(get_admin_user),
+):
     """
     查看当前活跃的 WebSocket 连接（仅管理员）
 
@@ -750,13 +776,6 @@ async def list_connections(current_user: AuthUser = Depends(get_current_user)):
     - 每个用户的连接列表
     - 每个连接的详细信息（session_id, user_id, 连接时间, 最后活动时间）
     """
-    # 只有管理员可以查看
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="需要管理员权限"
-        )
-
     manager = get_connection_manager()
 
     connections = []
@@ -785,10 +804,10 @@ async def list_connections(current_user: AuthUser = Depends(get_current_user)):
 @router.post("/ws/connections/user/clear")
 async def clear_user_connections(
     user_id: str = None,
-    current_user: AuthUser = Depends(get_current_user)
+    current_user: AuthUser = Depends(get_admin_user)
 ):
     """
-    清理指定用户的所有 WebSocket 连接
+    清理指定用户的所有 WebSocket 连接（仅管理员可清理任意用户）。
 
     参数（Query）：
     - user_id: 要清理的用户 ID（不提供则清理当前用户的连接）
@@ -796,17 +815,10 @@ async def clear_user_connections(
     示例：
     POST /api/v1/admin/ws/connections/user/clear?user_id=user-abc123
     """
-    # 权限检查：只能清理自己的连接，或管理员清理任意用户
-    if current_user.role != "admin":
-        if user_id and user_id != current_user.user_id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="只能清理自己的连接"
-            )
-        user_id = current_user.user_id
-
     manager = get_connection_manager()
-    sessions = manager.get_user_sessions(user_id)
+    target_user = user_id or current_user.user_id
+
+    sessions = manager.get_user_sessions(target_user)
 
     count = 0
     for session_id in sessions:
@@ -816,26 +828,20 @@ async def clear_user_connections(
     return {
         "success": True,
         "data": {
-            "cleared_user": user_id,
+            "cleared_user": target_user,
             "cleared_count": count,
         },
-        "message": f"已清理用户 {user_id} 的 {count} 个连接"
+        "message": f"已清理用户 {target_user} 的 {count} 个连接"
     }
 
 
 @router.post("/ws/connections/all/clear")
-async def clear_all_connections(current_user: AuthUser = Depends(get_current_user)):
+async def clear_all_connections(current_user: AuthUser = Depends(get_admin_user)):
     """
     清理所有 WebSocket 连接（仅管理员）
 
-    用于���急情况：当连接数超限或需要强制重启时
+    用于紧急情况：当连接数超限或需要强制重启时
     """
-    if current_user.role != "admin":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="需要管理员权限"
-        )
-
     manager = get_connection_manager()
     count = manager.get_active_count()
 
