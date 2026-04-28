@@ -80,41 +80,66 @@ class DocumentRepository:
         doc_type: str,
         file_hash: str | None,
         file_mtime: float | None,
+        dry_run: bool = False,
     ) -> tuple[int, str]:
         """
         Insert or update document record by source_path.
-        Returns (doc_id, action) where action is "created" | "updated" | "unchanged"
+        Returns (doc_id, action) where action is "created" | "updated" | "unchanged" | "previewed".
+
+        State machine:
+        - dry_run=True, hash matches, status != dry_run_previewed  → mark dry_run_previewed, return "previewed"
+        - dry_run=True, hash matches, status == dry_run_previewed  → return "unchanged" (already previewed)
+        - dry_run=False, hash matches, status == dry_run_previewed  → set status=pending, return "updated" (enter ingestion pipeline)
+        - dry_run=False, hash matches, status != dry_run_previewed  → return "unchanged" (fully indexed, skip)
+        - hash changed → upsert to pending, return "created" or "updated"
         """
         async with self.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
-                # 查询是否存在该 source_path 的记录（按 id 倒序，取最新的一条）
                 await cur.execute(
-                    "SELECT id, file_hash FROM documents WHERE source_path = %s AND status != 'deleted' ORDER BY id DESC LIMIT 1",
+                    "SELECT id, file_hash, status FROM documents WHERE source_path = %s AND status != 'deleted' ORDER BY id DESC LIMIT 1",
                     (source_path,),
                 )
                 existing = await cur.fetchone()
 
                 if existing is None:
-                    # 记录不存在，插入新记录
+                    initial_status = "dry_run_previewed" if dry_run else "pending"
                     await cur.execute(
                         "INSERT INTO documents (title, doc_type, source_path, file_path, file_hash, file_mtime, status) "
-                        "VALUES (%s, %s, %s, %s, %s, %s, 'pending')",
-                        (title, doc_type, source_path, source_path, file_hash, file_mtime),
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                        (title, doc_type, source_path, source_path, file_hash, file_mtime, initial_status),
                     )
-                    return (cur.lastrowid, "created")
+                    return (cur.lastrowid, "previewed" if dry_run else "created")
 
-                # 记录存在，比较 file_hash 判断是否需要更新
-                if existing["file_hash"] != file_hash:
+                existing_id = existing["id"]
+                existing_hash = existing["file_hash"]
+                existing_status = existing["status"]
+
+                if existing_hash != file_hash:
                     await cur.execute(
                         "UPDATE documents SET title = %s, file_hash = %s, file_mtime = %s, "
                         "status = 'pending', indexed_at = NULL, chunk_count = 0 "
                         "WHERE id = %s",
-                        (title, file_hash, file_mtime, existing["id"]),
+                        (title, file_hash, file_mtime, existing_id),
                     )
-                    return (existing["id"], "updated")
+                    return (existing_id, "updated")
 
-                # 内容未变化，保持原有状态（已有索引的应保持 done）
-                return (existing["id"], "unchanged")
+                # hash unchanged — consult status
+                if existing_status == "dry_run_previewed" and not dry_run:
+                    await cur.execute(
+                        "UPDATE documents SET status = 'pending', indexed_at = NULL, chunk_count = 0 WHERE id = %s",
+                        (existing_id,),
+                    )
+                    return (existing_id, "updated")
+
+                if dry_run:
+                    if existing_status != "dry_run_previewed":
+                        await cur.execute(
+                            "UPDATE documents SET status = 'dry_run_previewed' WHERE id = %s",
+                            (existing_id,),
+                        )
+                    return (existing_id, "previewed")
+
+                return (existing_id, "unchanged")
 
     async def mark_deleted(self, doc_id: int):
         """Soft delete document (status='deleted')"""

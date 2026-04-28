@@ -72,7 +72,7 @@ async def websocket_chat(
     from app.logging_config import get_logger
     _ws_logger = get_logger("websocket.debug")
 
-    # 1. 认证（支持多种方式）
+    # 1. 认证（仅从 Authorization header 获取，URL query string 不再支持）
     headers = dict(websocket.headers)
     auth_header = headers.get("Authorization") or headers.get("authorization") or ""
     _ws_logger.info("WebSocket handshake start", extra={
@@ -82,8 +82,6 @@ async def websocket_chat(
     })
     try:
         auth_user = None
-        # 优先从 Authorization header 获取
-        auth_header = headers.get("Authorization") or headers.get("authorization") or ""
         if auth_header.startswith("Bearer "):
             token = auth_header[7:]
         else:
@@ -94,17 +92,6 @@ async def websocket_chat(
         })
         if token:
             auth_user = decode_token(token)
-        # 如果 header 方式失败，尝试从 URL query string 获取 token
-        if not auth_user:
-            token_from_query = websocket.query_params.get("token")
-            _ws_logger.info("Token from query params", extra={
-                "query_params_keys": list(websocket.query_params.keys()),
-                "token_from_query_present": bool(token_from_query),
-                "token_from_query_preview": token_from_query[:30] + "..." if token_from_query else "none",
-            })
-            if token_from_query:
-                auth_user = decode_token(token_from_query)
-                _ws_logger.info("Token verified via URL query", extra={"user_id": auth_user.user_id})
         if not auth_user:
             raise JWTError("Missing authorization token")
         user_id = auth_user.user_id

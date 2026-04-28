@@ -267,6 +267,6 @@ def get_config() -> AppConfig:
             model=os.getenv("STT_MODEL", "paraformer-realtime-v2"),
             timeout=int(os.getenv("STT_TIMEOUT", "30")),
         ),
-        cors_origins=os.getenv("CORS_ORIGINS", "*").split(","),
+        cors_origins=os.getenv("CORS_ORIGINS", "").split(","),
         debug=_str_to_bool(os.getenv("DEBUG")),
     )

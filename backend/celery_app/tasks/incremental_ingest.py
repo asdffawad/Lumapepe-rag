@@ -83,6 +83,7 @@ def daily_incremental_ingest(dry_run: bool = False, delete_missing: bool = True)
                 "added": result.added,
                 "updated": result.updated,
                 "unchanged": result.unchanged,
+                "previewed": result.previewed,
                 "deleted": result.deleted,
                 "errors": result.errors,
                 "details_count": len(result.details),

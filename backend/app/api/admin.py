@@ -647,7 +647,7 @@ async def trigger_incremental_ingest(dry_run: bool = False, delete_missing: bool
     {
         "status": "success",
         "dry_run": false,
-        "summary": {"added": 2, "updated": 1, "unchanged": 10, "deleted": 0, "errors": 0},
+        "summary": {"added": 2, "updated": 1, "unchanged": 10, "previewed": 0, "deleted": 0, "errors": 0},
         "details": [
             {"source_path": "products.json::SKU001", "action": "updated", "doc_id": 5, "title": "...", "chunks": 8}
         ]
@@ -721,6 +721,7 @@ async def trigger_incremental_ingest(dry_run: bool = False, delete_missing: bool
                 "added": result.added,
                 "updated": result.updated,
                 "unchanged": result.unchanged,
+                "previewed": result.previewed,
                 "deleted": result.deleted,
                 "errors": result.errors,
             },

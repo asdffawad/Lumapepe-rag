@@ -17,6 +17,7 @@ from dataclasses import dataclass
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from pydantic import BaseModel, Field
 
+from app.middleware.auth import get_current_user, AuthUser
 from app.services.product_service import ProductService
 from app.models.product import ResolveResult, ProductDetail, ProductSearchResult
 from app.logging_config import get_logger
@@ -104,6 +105,7 @@ def set_product_service(service: ProductService) -> None:
 async def search_product(
     request: ProductSearchRequest,
     service: ProductService = Depends(get_product_service),
+    current_user: AuthUser = Depends(get_current_user),
 ) -> dict:
     """
     商品检索主入口
@@ -144,6 +146,7 @@ async def search_product(
 async def resolve_product(
     request: ProductResolveRequest,
     service: ProductService = Depends(get_product_service),
+    current_user: AuthUser = Depends(get_current_user),
 ) -> dict:
     """
     仅解析商品（不查询数据库）
@@ -179,6 +182,7 @@ async def resolve_product(
 async def get_sku_detail(
     sku_id: int,
     service: ProductService = Depends(get_product_service),
+    current_user: AuthUser = Depends(get_current_user),
 ) -> dict:
     """
     获取SKU详情
@@ -214,6 +218,7 @@ async def get_sku_detail(
 async def get_spu_detail(
     spu_id: int,
     service: ProductService = Depends(get_product_service),
+    current_user: AuthUser = Depends(get_current_user),
 ) -> dict:
     """
     获取SPU详情
@@ -249,6 +254,7 @@ async def get_spu_detail(
 async def reload_dict(
     force: bool = Query(default=False, description="是否强制重载"),
     service: ProductService = Depends(get_product_service),
+    current_user: AuthUser = Depends(get_current_user),
 ) -> dict:
     """
     手动触发字典重载
@@ -286,6 +292,7 @@ async def reload_dict(
 async def rebuild_dict(
     request: DictRebuildRequest = None,
     service: ProductService = Depends(get_product_service),
+    current_user: AuthUser = Depends(get_current_user),
 ) -> dict:
     """
     重新构建字典（从数据库拉取）
@@ -324,6 +331,7 @@ async def rebuild_dict(
 @router.get("/dict/stats", response_model=dict)
 async def get_dict_stats(
     service: ProductService = Depends(get_product_service),
+    current_user: AuthUser = Depends(get_current_user),
 ) -> dict:
     """
     获取字典统计信息
@@ -345,6 +353,7 @@ async def get_dict_stats(
 async def get_product_context_by_id(
     sku_id: int | None = Query(default=None, description="SKU ID"),
     spu_id: int | None = Query(default=None, description="SPU ID"),
+    current_user: AuthUser = Depends(get_current_user),
 ) -> dict:
     """
     通过SKU或SPU ID获取商品上下文（用于前端URL参数测试）

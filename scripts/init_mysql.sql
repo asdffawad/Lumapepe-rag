@@ -42,7 +42,7 @@ CREATE TABLE IF NOT EXISTS documents (
     file_hash VARCHAR(64),
     file_mtime DATETIME COMMENT '文件修改时间，用于判断是否需要更新',
     chunk_count INT,
-    status ENUM('pending','processing','done','failed','deleted') DEFAULT 'pending',
+    status ENUM('pending','processing','done','failed','deleted','dry_run_previewed') DEFAULT 'pending',
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME ON UPDATE CURRENT_TIMESTAMP,
     indexed_at DATETIME,

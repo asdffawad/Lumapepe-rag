@@ -121,20 +121,19 @@ async def chat_stream(
 async def get_chat_history(
     session_id: str,
     session_svc: SessionService = Depends(get_session_service),
-    user_id: str = Query("", description="用户ID，用于会话隔离验证"),
+    current_user: AuthUser = Depends(get_current_user),
     limit: int = 20,
 ):
     """
     获取指定会话的聊天历史。
 
-    会话隔离：若传入了 user_id，则验证 session 是否属于该用户。
+    会话隔离：验证 session 是否属于当前认证用户。
     """
-    if user_id:
-        owned = await session_svc.verify_session_ownership(session_id, user_id)
-        if not owned:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail={"code": "SESSION_ACCESS_DENIED", "message": "您无权访问该会话"},
-            )
+    owned = await session_svc.verify_session_ownership(session_id, current_user.user_id)
+    if not owned:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "SESSION_ACCESS_DENIED", "message": "您无权访问该会话"},
+        )
     history = await session_svc.get_history(session_id, limit=limit)
     return {"session_id": session_id, "history": history}

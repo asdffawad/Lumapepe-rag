@@ -373,13 +373,13 @@ def create_app() -> FastAPI:
         )
         request_id = getattr(request.state, "request_id", None)
         exc_msg = str(exc)
-        if "CHAT_ERROR" in exc_msg or "LLMError" in exc_msg or "HTTP" in exc_msg:
+        if "CHAT_ERROR" in exc_msg:
             return JSONResponse(
                 status_code=500,
                 content={
                     "error": {
                         "code": "CHAT_ERROR",
-                        "message": exc_msg,
+                        "message": "聊天服务错误，请稍后重试",
                         "request_id": request_id,
                     }
                 },

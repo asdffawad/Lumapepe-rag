@@ -22,6 +22,7 @@ POST /api/v1/intent - 意图分类接口
 """
 from fastapi import APIRouter, Depends
 
+from app.middleware.auth import get_current_user, AuthUser
 from app.services.intent_service import IntentClassifier
 from app.models.request import IntentRequest
 from app.models.response import IntentResponse
@@ -38,6 +39,7 @@ def get_intent_classifier() -> IntentClassifier:
 async def classify_intent(
     request: IntentRequest,
     classifier: IntentClassifier = Depends(get_intent_classifier),
+    current_user: AuthUser = Depends(get_current_user),
 ):
     result = await classifier.classify(request.message, request.history)
     return IntentResponse(

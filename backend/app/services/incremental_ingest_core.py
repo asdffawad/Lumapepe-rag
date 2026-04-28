@@ -53,6 +53,7 @@ class IncrementalIngestResult:
     added: int = 0          # 新增文档数
     updated: int = 0        # 更新文档数
     unchanged: int = 0      # 未变化文档数
+    previewed: int = 0     # dry_run 预览文档数
     deleted: int = 0         # 删除文档数
     errors: int = 0          # 错误数
     details: list[dict] = field(default_factory=list)  # 详细操作记录
@@ -340,7 +341,18 @@ async def run_incremental_ingestion(
                         doc_type=doc_type,
                         file_hash=file_hash,
                         file_mtime=mtime,
+                        dry_run=dry_run,
                     )
+
+                    if action == "previewed":
+                        result.previewed += 1
+                        result.details.append({
+                            "source_path": source_path,
+                            "action": "previewed",
+                            "title": file_item.get("title", source_path),
+                            "message": "dry_run 预览",
+                        })
+                        continue
 
                     if action == "unchanged":
                         result.unchanged += 1
@@ -355,17 +367,6 @@ async def run_incremental_ingestion(
                         result.added += 1
                     else:  # updated
                         result.updated += 1
-
-                    # 跳过 dry_run 模式的写入
-                    if dry_run:
-                        result.details.append({
-                            "source_path": source_path,
-                            "action": action,
-                            "title": file_item.get("title", source_path),
-                            "chunks": None,
-                            "message": "dry_run 预览",
-                        })
-                        continue
 
                     # -------------------------------------------------------------------------
                     # 3b. 删除旧向量（如果是更新）
@@ -437,7 +438,18 @@ async def run_incremental_ingestion(
                         doc_type=doc_type,
                         file_hash=file_hash,
                         file_mtime=mtime,
+                        dry_run=dry_run,
                     )
+
+                    if action == "previewed":
+                        result.previewed += 1
+                        result.details.append({
+                            "source_path": source_path,
+                            "action": "previewed",
+                            "title": parsed.title,
+                            "message": "dry_run 预览",
+                        })
+                        continue
 
                     if action == "unchanged":
                         result.unchanged += 1
@@ -452,16 +464,6 @@ async def run_incremental_ingestion(
                         result.added += 1
                     else:  # updated
                         result.updated += 1
-
-                    if dry_run:
-                        result.details.append({
-                            "source_path": source_path,
-                            "action": action,
-                            "title": parsed.title,
-                            "chunks": None,
-                            "message": "dry_run 预览",
-                        })
-                        continue
 
                     # 删除旧向量
                     if qdrant_client is not None and action == "updated":

@@ -228,16 +228,6 @@ def verify_admin_key(api_key: str) -> bool:
 
     allowed_keys = os.getenv("ADMIN_API_KEYS", "")
     if not allowed_keys:
-        # 开发模式允许使用默认密钥（带警告）
-        if _IS_DEBUG:
-            import warnings
-            warnings.warn(
-                "[WARNING] ADMIN_API_KEYS is not set. Admin endpoints are unprotected in development mode. "
-                "Set ADMIN_API_KEYS in production.",
-                UserWarning,
-                stacklevel=2,
-            )
-            return True
         return False
 
     for entry in allowed_keys.split(","):

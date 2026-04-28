@@ -28,8 +28,8 @@ async def _check_mysql() -> dict:
                 await cur.fetchone()
                 latency_ms = round((time.time() - start) * 1000)
         return {"status": "up", "latency_ms": latency_ms}
-    except Exception as e:
-        return {"status": "down", "latency_ms": 0, "error": str(e)}
+    except Exception:
+        return {"status": "down", "latency_ms": 0, "error": "connection_failed"}
 
 
 async def _check_redis() -> dict:
@@ -41,8 +41,8 @@ async def _check_redis() -> dict:
         pong = await r.ping()
         latency_ms = round((time.time() - start) * 1000)
         return {"status": "up" if pong else "down", "latency_ms": latency_ms}
-    except Exception as e:
-        return {"status": "down", "latency_ms": 0, "error": str(e)}
+    except Exception:
+        return {"status": "down", "latency_ms": 0, "error": "connection_failed"}
 
 
 async def _check_qdrant() -> dict:
@@ -57,8 +57,8 @@ async def _check_qdrant() -> dict:
                     return {"status": "up", "entities": 0}
                 return {"status": "degraded", "entities": 0}
         return {"status": "degraded", "entities": 0, "reason": "using_mock_retriever"}
-    except Exception as e:
-        return {"status": "down", "error": str(e)}
+    except Exception:
+        return {"status": "down", "error": "connection_failed"}
 
 
 async def _check_llm() -> dict:
@@ -68,8 +68,8 @@ async def _check_llm() -> dict:
         if hasattr(_app.state, "orchestrator"):
             return {"status": "available", "reason": "llm_configured"}
         return {"status": "unknown"}
-    except Exception as e:
-        return {"status": "down", "error": str(e)}
+    except Exception:
+        return {"status": "down", "error": "connection_failed"}
 
 
 @router.get("/health")

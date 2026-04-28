@@ -7,15 +7,16 @@ POST /api/v1/debug/auth/token — 获取测试用 JWT Token（仅用于测试环
 from __future__ import annotations
 
 import math
+import os
 import time
 from typing import Any
 
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel, Field
 
 from app.logging_config import get_logger
 from app.config import get_config
-from app.middleware.auth import create_token
+from app.middleware.auth import create_token, get_current_user, AuthUser
 from app.services.vector_retriever import SimpleVectorRetriever, HybridRetriever, RetrievedDoc
 from app.services.reranker import MMRReranker, RerankedDoc
 from app.services.llm_generator import StandardLLMGenerator
@@ -314,12 +315,12 @@ def _compute_bm25_and_rrf(
 # Endpoint: POST /api/v1/debug/retrieve
 # ---------------------------------------------------------------------------
 @router.post("/retrieve", response_model=RetrieveResponse)
-async def debug_retrieve(request: RetrieveRequest):
+async def debug_retrieve(
+    request: RetrieveRequest,
+    current_user: AuthUser = Depends(get_current_user),
+):
     """
-    分阶段检索调试接口。
-
-    展示从向量召回 → BM25 → RRF 融合 → MMR 重排 → LLM 生成的全流程，
-    每个阶段返回独立的结果和耗时。
+    分阶段检索调试接口（需认证）
     """
     overall_start = time.monotonic()
 
@@ -612,10 +613,12 @@ async def debug_retrieve(request: RetrieveRequest):
 # Endpoint: GET /api/v1/debug/embed
 # ---------------------------------------------------------------------------
 @router.get("/embed", response_model=EmbedResponse)
-async def debug_embed(text: str = Query(..., description="待测试文本")):
+async def debug_embed(
+    text: str = Query(..., description="待测试文本"),
+    current_user: AuthUser = Depends(get_current_user),
+):
     """
-    Embedding 测试接口。
-    返回文本的 token 估算数、向量维度、前 5 个维度预览和延迟。
+    Embedding 测试接口（需认证）
     """
     from app.services.embedding_service import EmbeddingService
 
@@ -646,6 +649,10 @@ async def debug_embed(text: str = Query(..., description="待测试文本")):
 # ---------------------------------------------------------------------------
 # Endpoint: POST /api/v1/debug/auth/token
 # ---------------------------------------------------------------------------
+# 固定配置：仅当显式启用时才允许生成测试 token（由环境变量控制，启动时读取一次）
+_DEBUG_TOKEN_ENABLED = os.getenv("DEBUG_TOKEN_ENABLED", "false").lower() in ("true", "1", "yes")
+
+
 class TokenRequest(BaseModel):
     user_id: str = Field(..., description="用户ID")
     role: str = Field(default="user", description="用户角色")
@@ -659,17 +666,13 @@ class TokenResponse(BaseModel):
 @router.post("/auth/token", response_model=TokenResponse)
 async def create_test_token(request: TokenRequest):
     """
-    生成测试用 JWT Token（仅用于测试环境）
+    生成测试用 JWT Token（仅当 DEBUG_TOKEN_ENABLED=true 时可用）
 
-    用于前端 WebSocket 连接认证。
-    生产环境应使用真实的登录流程。
+    生产环境默认禁用此接口。
     """
-    import os
-
-    # 仅在测试环境允许此接口
-    env = os.getenv("APP_ENV", "development")
-    if env == "production":
-        return {"error": "Not available in production"}, 403
+    if not _DEBUG_TOKEN_ENABLED:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Not found")
 
     token = create_token(
         user_id=request.user_id,
