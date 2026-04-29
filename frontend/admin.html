@@ -1664,6 +1664,8 @@ async function doUpload() {
 
     const xhr = new XMLHttpRequest();
     xhr.open('POST', API_CONFIG.ENDPOINTS.DOCUMENT_UPLOAD);
+    const token = await getAdminToken();
+    if (token) xhr.setRequestHeader('Authorization', 'Bearer ' + token);
 
     xhr.upload.onprogress = (e) => {
       if (e.lengthComputable) {
