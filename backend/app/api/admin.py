@@ -33,9 +33,10 @@ import time
 from pathlib import Path
 from typing import Any
 
-from fastapi import APIRouter, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 
 from app.models.request import DocumentCreateRequest, DocumentUpdateRequest
+from app.middleware.auth import AuthUser, get_admin_user
 
 # 路径计算：动态检测脚本目录位置
 # Docker 中 working_dir=/app/backend，__file__ → /app/backend/app/api/admin.py → /app/
@@ -759,8 +760,6 @@ async def trigger_incremental_ingest(
 
 # ============ WebSocket 连接管理（调试工具）============
 
-from fastapi import Depends, Request
-from app.middleware.auth import get_current_user, get_admin_user, AuthUser
 from app.api.ws_manager import get_connection_manager, reset_connection_manager
 
 

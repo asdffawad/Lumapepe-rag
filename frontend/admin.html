@@ -1196,6 +1196,51 @@ const API_CONFIG = {
     }
 };
 
+// ==================== Token 管理 ====================
+let _adminToken = null;
+
+async function getAdminToken() {
+    if (_adminToken) return _adminToken;
+    // 优先尝试从 localStorage 读取并验证
+    const stored = localStorage.getItem('rag_admin_token');
+    if (stored) {
+        try {
+            const payload = JSON.parse(atob(stored.split('.')[1]));
+            if (payload.exp && payload.exp > Date.now() / 1000) {
+                _adminToken = stored;
+                return _adminToken;
+            }
+        } catch (e) { /* ignore */ }
+        localStorage.removeItem('rag_admin_token');
+    }
+    // 向后端请求新 token
+    try {
+        const r = await fetch('/api/v1/debug/auth/token', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user_id: 'admin', role: 'admin' })
+        });
+        const text = await r.text();
+        if (r.ok && text) {
+            try {
+                const d = JSON.parse(text);
+                if (d.token) {
+                    _adminToken = d.token;
+                    localStorage.setItem('rag_admin_token', _adminToken);
+                    console.log('[Auth] Token obtained successfully');
+                    return _adminToken;
+                }
+            } catch (e) { console.error('[Auth] JSON parse error:', e, 'text:', text); }
+        }
+        console.error('[Auth] Token request failed:', r.status, text);
+    } catch (e) { console.error('[Auth] Fetch error:', e); }
+    return null;
+}
+
+function authHeaders() {
+    return _adminToken ? { 'Authorization': 'Bearer ' + _adminToken } : {};
+}
+
 // ==================== 网络请求日志系统 ====================
 const RequestLogger = {
     logs: [],
@@ -1312,7 +1357,8 @@ function showToast(msg, type = 'info') {
 
 async function apiFetch(url, options = {}) {
   try {
-    const r = await fetch(url, options);
+    const headers = { ...(options.headers || {}), ...authHeaders() };
+    const r = await fetch(url, { ...options, headers });
     const text = await r.text();
     if (!r.ok) return { ok: false, status: r.status, msg: text.slice(0, 300) };
     try { return { ok: true, data: JSON.parse(text) }; }
@@ -1322,7 +1368,7 @@ async function apiFetch(url, options = {}) {
 
 async function apiGet(url) {
   try {
-    const r = await fetch(url);
+    const r = await fetch(url, { headers: authHeaders() });
     const text = await r.text();
     if (!r.ok) return { ok: false, status: r.status, msg: text.slice(0, 200) };
     try { return { ok: true, data: JSON.parse(text) }; }
@@ -1334,7 +1380,7 @@ async function apiPost(url, body) {
   try {
     const r = await fetch(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify(body || {})
     });
     const text = await r.text();
@@ -1461,7 +1507,7 @@ async function runSingleTest(message, type) {
   try {
     const res = await fetch('/api/v1/chat', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...authHeaders() },
       body: JSON.stringify({ message, user_id: 'test-user', session_id: testSession })
     });
     const data = await res.json();
@@ -1681,7 +1727,7 @@ async function runIncremental(dryRun = true, deleteMissing = true) {
   try {
     const res = await fetch(`/api/v1/admin/ingest/incremental?dry_run=${dryRun}&delete_missing=${deleteMissing}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json', ...authHeaders() }
     });
     const data = await res.json();
 
@@ -1746,7 +1792,7 @@ async function scanDataDir() {
   try {
     const res = await fetch('/api/v1/admin/ingest/incremental?dry_run=true&delete_missing=false', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' }
+      headers: { 'Content-Type': 'application/json', ...authHeaders() }
     });
     const data = await res.json();
 
@@ -1813,6 +1859,7 @@ function clearIngestLog() {
 
 // ── Init ──────────────────────────────────────────────────────────
 loadMonitor();
+getAdminToken(); // 后台获取 admin token（静默失败时不影响页面渲染）
 
 // ── ══ 检索调试 ★ ══ ─────────────────────────────────────────────
 

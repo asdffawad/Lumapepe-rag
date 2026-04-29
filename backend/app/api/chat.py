@@ -36,6 +36,7 @@ from app.services.llm_generator import StreamChunk
 from app.models.request import ChatRequest
 from app.models.response import ChatResponse
 from app.logging_config import get_logger
+from app.middleware.auth import AuthUser, get_current_user
 
 router = APIRouter(prefix="/api/v1", tags=["chat"])
 _logger = get_logger("chat.api")

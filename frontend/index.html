@@ -1102,7 +1102,8 @@
  *   Response: { success: bool, token: string, expires_in: int }
  *
  * WebSocket:
- *   ws://host/ws/chat?token={token}&session_id={id}&sku_id={id}&spu_id={id}
+ *   ws://host/ws/chat
+ *   认证通过 Sec-WebSocket-Protocol header 传递: new WebSocket(url, ['bearer', token])
  *
  * 商品上下文:
  *   GET /products/context?sku_id={id}&spu_id={id}
@@ -1887,17 +1888,17 @@
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const host = window.location.host;
 
-        // 构建 WebSocket URL
-        let wsUrl = `${protocol}//${host}${API_CONFIG.ENDPOINTS.WS_CHAT}?token=${encodeURIComponent(state.token)}`;
+        // 构建 WebSocket URL（token 不放在 URL 中）
+        let wsUrl = `${protocol}//${host}${API_CONFIG.ENDPOINTS.WS_CHAT}`;
 
         if (state.sessionId) {
-            wsUrl += `&session_id=${encodeURIComponent(state.sessionId)}`;
+            wsUrl += `?session_id=${encodeURIComponent(state.sessionId)}`;
         }
         if (state.urlSkuId) {
-            wsUrl += `&sku_id=${state.urlSkuId}`;
+            wsUrl += (state.sessionId ? '&' : '?') + `sku_id=${state.urlSkuId}`;
         }
         if (state.urlSpuId) {
-            wsUrl += `&spu_id=${state.urlSpuId}`;
+            wsUrl += (state.sessionId || state.urlSkuId ? '&' : '?') + `spu_id=${state.urlSpuId}`;
         }
 
         console.debug('[WS] Connecting:', wsUrl);
@@ -1911,7 +1912,9 @@
             status: 0
         });
 
-        state.ws = new WebSocket(wsUrl);
+        // 使用 Sec-WebSocket-Protocol 传递 Bearer token
+        // new WebSocket(url, ['bearer', token]) 浏览器发送: Sec-WebSocket-Protocol: bearer, <token>
+        state.ws = new WebSocket(wsUrl, ['bearer', state.token]);
 
         state.ws.onopen = () => {
             console.debug('[WS] Connected');

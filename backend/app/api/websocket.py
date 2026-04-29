@@ -70,36 +70,31 @@ async def websocket_chat(
     """
     from app.middleware.auth import JWTError, verify_ws_token
     from app.logging_config import get_logger
-    _ws_logger = get_logger("websocket.debug")
 
-    # 1. 认证（仅从 Authorization header 获取，URL query string 不再支持）
+    # 提取 subprotocol (Sec-WebSocket-Protocol) 以便在 accept 时回传
+    # 浏览器通过 Sec-WebSocket-Protocol: bearer, <token> 传递认证信息
+    # accept 时必须回传相同 subprotocol 才能让浏览器确认握手成功
     headers = dict(websocket.headers)
-    auth_header = headers.get("Authorization") or headers.get("authorization") or ""
+    subprotocol = headers.get("sec-websocket-protocol", "")
+    if isinstance(subprotocol, list):
+        subprotocol = subprotocol[0] if subprotocol else None
+    elif subprotocol and "," in subprotocol:
+        subprotocol = subprotocol.split(",")[0].strip()
+
+    _ws_logger = get_logger("websocket.debug")
     _ws_logger.info("WebSocket handshake start", extra={
         "path": str(websocket.url),
-        "has_auth_header": bool(auth_header),
-        "auth_header_preview": auth_header[:30] if auth_header else "none",
+        "subprotocol": subprotocol,
     })
+
+    # 1. 认证（支持 Authorization Header 和 Sec-WebSocket-Protocol 两种方式）
     try:
-        auth_user = None
-        if auth_header.startswith("Bearer "):
-            token = auth_header[7:]
-        else:
-            token = None
-        _ws_logger.info("Token extraction from headers", extra={
-            "token_present": bool(token),
-            "token_preview": token[:30] + "..." if token else "none",
-        })
-        if token:
-            auth_user = decode_token(token)
-        if not auth_user:
-            raise JWTError("Missing authorization token")
+        auth_user = await verify_ws_token(headers)
         user_id = auth_user.user_id
         _ws_logger.info("Token verified successfully", extra={"user_id": user_id})
     except JWTError as e:
         _ws_logger.error("Token verification failed", extra={
             "error": str(e),
-            "auth_header_preview": auth_header[:30] if auth_header else "none",
         })
         await websocket.close(code=4001, reason=str(e))
         return
@@ -111,8 +106,8 @@ async def websocket_chat(
     manager = get_connection_manager()
 
     _ws_logger.info("Attempting to accept WebSocket")
-    # WebSocket.accept() 是 async 函数，必须 await
-    await websocket.accept()
+    # WebSocket.accept() 必须传 subprotocol，否则 Chrome 会因握手不完整而报 ABORT_CLOSURE
+    await websocket.accept(subprotocol=subprotocol)
     _ws_logger.info("WebSocket accepted successfully")
 
     # 4. 建立连接（检查连接数限制）
