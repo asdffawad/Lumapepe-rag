@@ -5,11 +5,11 @@ import asyncio
 import base64
 import uuid
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from app.api.ws_manager import get_connection_manager
 from app.services.stt_service import STTFactory, STTConfig, STTError
-from app.middleware.auth import decode_token, JWTError
+from app.middleware.auth import JWTError, verify_ws_token
 from app.logging_config import get_logger
 
 router = APIRouter(tags=["voice"])
@@ -40,32 +40,31 @@ def _get_stt_provider():
 @router.websocket("/ws/voice")
 async def websocket_voice(
     websocket: WebSocket,
-    token: str = Query(None),
 ):
     """
     Real-time voice transcription WebSocket with true streaming support.
 
+    认证：使用 Authorization Header 或 Sec-WebSocket-Protocol
+    Headers:
+      Authorization: Bearer <JWT>
+      或
+      Sec-WebSocket-Protocol: bearer, <JWT>
+
     Protocol:
-    1. Client connects with ?token=<jwt>
+    1. Client connects (token via Sec-WebSocket-Protocol or Authorization Header)
     2. Server sends: {"type": "connected", "session_id": "..."}
     3. Client sends: {"type": "audio", "data": "<base64>"} (repeated)
     4. Server sends: {"type": "stream_text", "text": "<partial transcript>"} (repeated, in real-time)
     5. Client sends: {"type": "stop"}
     6. Server sends: {"type": "done", "text": "<final transcript>"}
     """
-    # 1. Auth
-    auth_header = dict(websocket.headers).get("Authorization") or ""
-    ws_token = token
-    if not ws_token and auth_header.startswith("Bearer "):
-        ws_token = auth_header[7:]
-
+    # 1. Auth（统一使用 verify_ws_token，支持 Sec-WebSocket-Protocol 和 Authorization Header）
     try:
-        auth_user = decode_token(ws_token) if ws_token else None
-    except JWTError:
-        await websocket.close(code=4001, reason="Invalid token")
+        auth_user = await verify_ws_token(dict(websocket.headers))
+        user_id = auth_user.user_id
+    except JWTError as e:
+        await websocket.close(code=4001, reason=str(e))
         return
-
-    user_id = auth_user.user_id if auth_user else "anonymous"
     session_id = str(uuid.uuid4())
 
     await websocket.accept()
