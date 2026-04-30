@@ -850,6 +850,55 @@
         }
         .voice-mode-toggle svg { width: 16px; height: 16px; }
 
+        .handoff-row {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-top: 12px;
+            flex-wrap: wrap;
+        }
+
+        .btn-handoff {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 20px;
+            font-size: 13px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .btn-handoff:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+            border-color: var(--accent);
+        }
+
+        .btn-handoff:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+        }
+
+        .btn-handoff svg {
+            width: 16px;
+            height: 16px;
+            stroke: currentColor;
+        }
+
+        .handoff-status {
+            font-size: 12px;
+            color: var(--text-muted);
+        }
+
+        .handoff-status.pending { color: var(--warning); }
+        .handoff-status.active { color: var(--accent-light); }
+        .handoff-status.closed { color: var(--success); }
+        .handoff-status.error { color: var(--error); }
+
         /* Voice transcript preview */
         .voice-preview {
             background: var(--bg-secondary);
@@ -1048,6 +1097,17 @@
                     </svg>
                     语音模式
                 </div>
+                <div class="handoff-row">
+                    <button class="btn-handoff" id="handoffBtn" onclick="requestHandoff()">
+                        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round">
+                            <path d="M21 15a4 4 0 0 1-4 4H7l-4 4V7a4 4 0 0 1 4-4h10a4 4 0 0 1 4 4z"/>
+                            <path d="M8 10h8"/>
+                            <path d="M8 14h5"/>
+                        </svg>
+                        转人工客服
+                    </button>
+                    <span class="handoff-status" id="handoffStatusText">AI 客服处理中</span>
+                </div>
                 <div class="quick-questions">
                     <span class="quick-q" onclick="askQuestion('查询我的订单状态', this)">&#128722; 查询订单</span>
                     <span class="quick-q" onclick="askQuestion('有哪些促销商品？', this)">&#128092; 促销</span>
@@ -1141,6 +1201,10 @@
 
             // WebSocket 路径
             WS_CHAT: '/ws/chat',
+
+            // 转人工
+            HANDOFF_REQUEST: '/api/kefu/handoff/request',
+            HANDOFF_STATUS: '/api/kefu/handoff/status',
 
             // 健康检查
             HEALTH: '/api/v1/health'
@@ -1441,6 +1505,8 @@
         chatMessages: document.getElementById('chatMessages'),
         messageInput: document.getElementById('messageInput'),
         sendBtn: document.getElementById('sendBtn'),
+        handoffBtn: document.getElementById('handoffBtn'),
+        handoffStatusText: document.getElementById('handoffStatusText'),
         toast: document.getElementById('toast'),
         pingCount: document.getElementById('pingCount'),
         pongCount: document.getElementById('pongCount'),
@@ -1477,6 +1543,9 @@
         token: null,
         sessionId: null,
         userId: 'user-' + Math.random().toString(36).substr(2, 8),
+        handoffStatus: 0,
+        kefuConversationId: null,
+        handoffLoading: false,
         status: 'disconnected',
         retryCount: 0,
         pingCount: 0,
@@ -1621,6 +1690,10 @@
                 state.accumulatedResponse = '';
                 break;
             case 'connected':
+                if (data.session_id && state.sessionId) {
+                    dom.sessionCount.textContent = state.sessionId?.substr(0, 8) || '-';
+                    refreshHandoffStatus(true);
+                }
                 if (data.product_context) {
                     state.productContext = data.product_context;
                     addProductCard(data.product_context);
@@ -1677,6 +1750,7 @@
 
         state.sessionId = data.session_id;
         dom.sessionCount.textContent = state.sessionId?.substr(0, 8) || '-';
+        refreshHandoffStatus(true);
         state.currentPlaceholder = null;
         state.accumulatedResponse = '';
         dom.sendBtn.disabled = false;
@@ -1772,6 +1846,81 @@
         const div = document.createElement('div');
         div.textContent = text;
         return div.innerHTML;
+    }
+
+    function handoffText(status) {
+        switch (Number(status || 0)) {
+            case 1: return '已进入人工客服队列，请等待接入';
+            case 2: return '人工客服处理中';
+            case 3: return '请求已关闭';
+            default: return 'AI 客服处理中';
+        }
+    }
+
+    function updateHandoffUi(data, isError = false) {
+        if (data) {
+            state.handoffStatus = Number(data.handoff_status || 0);
+            state.kefuConversationId = data.kefu_conversation_id || null;
+        }
+        const statusValue = Number(state.handoffStatus || 0);
+        dom.handoffStatusText.textContent = isError ? '转人工状态获取失败' : handoffText(statusValue);
+        dom.handoffStatusText.className = 'handoff-status';
+        if (isError) dom.handoffStatusText.classList.add('error');
+        else if (statusValue === 1) dom.handoffStatusText.classList.add('pending');
+        else if (statusValue === 2) dom.handoffStatusText.classList.add('active');
+        else if (statusValue === 3) dom.handoffStatusText.classList.add('closed');
+
+        dom.handoffBtn.disabled = state.handoffLoading || statusValue === 1 || statusValue === 2;
+        dom.handoffBtn.title = state.kefuConversationId
+            ? `客服会话 #${state.kefuConversationId}`
+            : '转人工客服';
+    }
+
+    async function refreshHandoffStatus(silent = true) {
+        if (!state.token || !state.sessionId) return;
+        const res = await apiFetch(`${API_CONFIG.ENDPOINTS.HANDOFF_STATUS}?session_id=${encodeURIComponent(state.sessionId)}`, {
+            method: 'GET',
+            headers: { 'Authorization': 'Bearer ' + state.token },
+        });
+        if (res.ok) {
+            updateHandoffUi(res.data);
+        } else if (!silent && res.status !== 404) {
+            updateHandoffUi(null, true);
+            showToast(res.data?.detail?.message || res.error || '转人工状态获取失败', 'error');
+        }
+    }
+
+    async function requestHandoff() {
+        if (!state.token) {
+            showToast('请先完成认证', 'error');
+            return;
+        }
+        if (!state.sessionId) {
+            showToast('请先发送一条消息建立会话', 'warning');
+            return;
+        }
+        if (state.handoffLoading) return;
+
+        state.handoffLoading = true;
+        updateHandoffUi();
+        const res = await apiFetch(API_CONFIG.ENDPOINTS.HANDOFF_REQUEST, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': 'Bearer ' + state.token,
+            },
+            body: JSON.stringify({ session_id: state.sessionId }),
+        });
+        state.handoffLoading = false;
+
+        if (res.ok) {
+            updateHandoffUi(res.data);
+            showToast('已进入人工客服队列', 'success');
+        } else {
+            updateHandoffUi(null, true);
+            const detail = res.data?.detail;
+            showToast(detail?.message || res.error || '转人工请求失败', 'error');
+        }
     }
 
     // ==================== 心跳 ====================
@@ -2056,6 +2205,13 @@
         const params = new URLSearchParams(window.location.search);
         state.urlSkuId = params.get('sku_id') ? parseInt(params.get('sku_id')) : null;
         state.urlSpuId = params.get('spu_id') ? parseInt(params.get('spu_id')) : null;
+        if (params.get('session_id')) {
+            state.sessionId = params.get('session_id');
+            dom.sessionCount.textContent = state.sessionId?.substr(0, 8) || '-';
+        }
+        if (params.get('user_id')) {
+            state.userId = params.get('user_id');
+        }
 
         if (state.urlSkuId || state.urlSpuId) {
             console.debug('[Product] URL params:', { sku_id: state.urlSkuId, spu_id: state.urlSpuId });
@@ -2097,6 +2253,7 @@
     window.toggleDebugPanel = toggleDebugPanel;
     window.clearDebugLog = clearDebugLog;
     window.askQuestion = askQuestion;
+    window.requestHandoff = requestHandoff;
     window.RequestLogger = RequestLogger;
 
     // ==================== Voice Input ====================

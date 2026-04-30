@@ -688,6 +688,10 @@ body {
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="13,2 3,14 12,14 11,22 21,10 12,10 13,2"/></svg>
     测试
   </button>
+  <button class="tab-btn" onclick="switchTab('kefu')">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a4 4 0 01-4 4H7l-4 4V7a4 4 0 014-4h10a4 4 0 014 4z"/><path d="M8 10h8"/><path d="M8 14h5"/></svg>
+    人工客服
+  </button>
   <button class="tab-btn" onclick="switchTab('knowledge')">
     <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z"/><polyline points="14,2 14,8 20,8"/></svg>
     知识库
@@ -743,6 +747,28 @@ body {
       </div>
       <div class="card" id="comp-list">
         <div style="padding:24px;text-align:center;color:var(--ink-4);font-size:13px">加载中...</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════
+     PANEL: 人工客服
+═══════════════════════════════════════════════ -->
+<div id="panel-kefu" class="panel">
+  <div class="content">
+    <div class="section">
+      <div class="section-header">
+        <span class="section-title">转人工请求</span>
+        <button class="btn btn-ghost btn-sm" onclick="loadKefuRequests()"><span class="spinner"></span> 刷新</button>
+      </div>
+      <div style="display:grid;grid-template-columns:minmax(320px,0.9fr) minmax(460px,1.4fr);gap:16px;align-items:start">
+        <div class="card" id="kefu-list" style="padding:0;overflow:hidden">
+          <div style="padding:24px;text-align:center;color:var(--ink-4);font-size:13px">加载中...</div>
+        </div>
+        <div class="card" id="kefu-detail" style="min-height:420px">
+          <div style="padding:48px 0;text-align:center;color:var(--ink-4);font-size:13px">选择左侧请求查看详情</div>
+        </div>
       </div>
     </div>
   </div>
@@ -1190,6 +1216,7 @@ const API_CONFIG = {
         DOCUMENT_DELETE: (id) => `/api/v1/admin/documents/${id}`,
         DOCUMENT_REINDEX: (id) => `/api/v1/admin/documents/${id}/reindex`,
         INGEST_INCREMENTAL: '/api/v1/admin/ingest/incremental',
+        KEFU_HANDOFF_REQUESTS: '/api/admin/kefu/handoff/requests',
         RETRIEVE_DEBUG: '/api/v1/debug/retrieve',
         AUTH_TOKEN: '/api/v1/debug/auth/token',
         CHAT: '/api/v1/chat'
@@ -1425,6 +1452,7 @@ function switchTab(name) {
     // 懒加载各 Tab 数据
     if (name === 'monitor') loadMonitor();
     else if (name === 'testing') { /* no init */ }
+    else if (name === 'kefu') loadKefuRequests();
     else if (name === 'knowledge') loadDocs();
     else if (name === 'ingest') { loadIngestDetails(); loadBeatSchedule(); }
     else if (name === 'retrieve') { /* auto-init */ }
@@ -1458,6 +1486,180 @@ async function loadMonitor() {
     </div>`;
   }).join('');
   document.getElementById('comp-list').innerHTML += `<div style="padding-top:8px;font-size:11px;color:var(--ink-4)">最后更新: ${ts()}</div>`;
+}
+
+// ── Kefu handoff ───────────────────────────────────────────────────
+let selectedKefuConversationId = null;
+
+function kefuStatusText(status) {
+  if (Number(status) === 1) return '处理中';
+  if (Number(status) === 2) return '已结束';
+  return '待接入';
+}
+
+function handoffStatusText(status) {
+  if (Number(status) === 1) return '待人工接入';
+  if (Number(status) === 2) return '人工处理中';
+  if (Number(status) === 3) return '已关闭';
+  return 'AI 处理中';
+}
+
+function fmtDate(value) {
+  if (!value) return '-';
+  try { return new Date(value).toLocaleString('zh-CN'); }
+  catch { return String(value); }
+}
+
+async function loadKefuRequests() {
+  await getAdminToken();
+  const container = document.getElementById('kefu-list');
+  container.innerHTML = '<div style="padding:24px;text-align:center;color:var(--ink-4);font-size:13px">加载中...</div>';
+  const res = await apiGet(API_CONFIG.ENDPOINTS.KEFU_HANDOFF_REQUESTS);
+  if (!res.ok) {
+    container.innerHTML = `<div style="padding:24px;color:var(--rose);font-size:13px">加载失败: ${escHtml(res.msg)}</div>`;
+    return;
+  }
+  const items = res.data.items || [];
+  if (!items.length) {
+    container.innerHTML = '<div style="padding:32px;text-align:center;color:var(--ink-4);font-size:13px">暂无待处理转人工请求</div>';
+    return;
+  }
+  container.innerHTML = items.map(item => {
+    const user = item.member_user || {};
+    const active = Number(item.kefu_conversation_id) === Number(selectedKefuConversationId);
+    return `<div style="padding:14px 16px;border-bottom:1px solid var(--paper-2);background:${active ? 'var(--violet-light)' : 'var(--white)'}">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px">
+        <strong style="font-size:14px;color:var(--ink)">#${item.kefu_conversation_id} · ${escHtml(user.nickname || ('用户 ' + (user.id || '-')))}</strong>
+        <span class="pill ${Number(item.status) === 0 ? 'pill-pending' : Number(item.status) === 1 ? 'pill-info' : 'pill-done'}">${kefuStatusText(item.status)}</span>
+      </div>
+      <div style="font-size:12px;color:var(--ink-3);line-height:1.6">
+        <div>ID: ${user.id || '-'} / ${escHtml(user.email || user.mobile || '-')}</div>
+        <div>发起: ${fmtDate(item.handoff_at)}</div>
+        <div style="margin-top:6px;color:var(--ink-2);display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${escHtml(item.last_message_content || item.summary || '-')}</div>
+      </div>
+      <div style="margin-top:10px;text-align:right">
+        <button class="btn btn-violet btn-sm" onclick="loadKefuDetail(${item.kefu_conversation_id})">查看</button>
+      </div>
+    </div>`;
+  }).join('');
+}
+
+async function loadKefuDetail(conversationId) {
+  await getAdminToken();
+  selectedKefuConversationId = conversationId;
+  const detail = document.getElementById('kefu-detail');
+  detail.innerHTML = '<div style="padding:48px 0;text-align:center;color:var(--ink-4);font-size:13px">加载中...</div>';
+  const res = await apiGet(`${API_CONFIG.ENDPOINTS.KEFU_HANDOFF_REQUESTS}/${conversationId}`);
+  if (!res.ok) {
+    detail.innerHTML = `<div style="color:var(--rose);font-size:13px">加载失败: ${escHtml(res.msg)}</div>`;
+    return;
+  }
+  renderKefuDetail(res.data);
+  loadKefuRequests();
+}
+
+function renderKefuDetail(data) {
+  const c = data.conversation || {};
+  const user = data.member_user || {};
+  const admin = data.assigned_admin || {};
+  const session = data.ragz_session || {};
+  const metadata = session.metadata || {};
+  const recent = metadata.recent_messages || [];
+  const citations = metadata.last_citations || [];
+  const ragMessages = data.ragz_messages || [];
+  const kefuMessages = data.kefu_messages || [];
+  const canAccept = Number(c.status) === 0;
+  const canClose = Number(c.status) !== 2;
+
+  document.getElementById('kefu-detail').innerHTML = `
+    <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px">
+      <div>
+        <div class="section-title" style="margin-bottom:6px">请求 #${c.id}</div>
+        <h2 style="font-size:20px;margin-bottom:6px">${escHtml(user.nickname || ('用户 ' + (user.id || '-')))}</h2>
+        <div style="font-size:12px;color:var(--ink-3)">状态: ${kefuStatusText(c.status)} / ${handoffStatusText(session.handoff_status)}</div>
+      </div>
+      <span class="pill ${Number(c.status) === 0 ? 'pill-pending' : Number(c.status) === 1 ? 'pill-info' : 'pill-done'}">${kefuStatusText(c.status)}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:14px;font-size:13px;color:var(--ink-2)">
+      <div><strong>用户ID:</strong> ${user.id || '-'}</div>
+      <div><strong>邮箱:</strong> ${escHtml(user.email || '-')}</div>
+      <div><strong>手机号:</strong> ${escHtml(user.mobile || '-')}</div>
+      <div><strong>客服:</strong> ${escHtml(admin.nickname || admin.username || '-')}</div>
+      <div><strong>发起时间:</strong> ${fmtDate(session.handoff_at || c.create_time)}</div>
+      <div><strong>更新时间:</strong> ${fmtDate(c.update_time || session.updated_at)}</div>
+    </div>
+    <div style="margin-bottom:14px">
+      <div class="section-title" style="margin-bottom:8px">AI 对话总结 summary</div>
+      <div style="background:var(--paper);border:1px solid var(--paper-2);border-radius:10px;padding:12px 14px;font-size:14px;line-height:1.6">${escHtml(session.summary || '暂无摘要')}</div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:14px">
+      <div>
+        <div class="section-title" style="margin-bottom:8px">metadata.recent_messages</div>
+        <div style="max-height:190px;overflow:auto;border:1px solid var(--paper-2);border-radius:10px;background:var(--paper)">
+          ${recent.length ? recent.map(m => `<div style="padding:10px 12px;border-bottom:1px solid var(--paper-2);font-size:12px;line-height:1.5"><strong>${escHtml(m.role || '-')}:</strong> ${escHtml(m.content || '')}</div>`).join('') : '<div style="padding:16px;color:var(--ink-4);font-size:12px">暂无 recent_messages</div>'}
+        </div>
+      </div>
+      <div>
+        <div class="section-title" style="margin-bottom:8px">RAG sources / citations</div>
+        <div style="max-height:190px;overflow:auto;border:1px solid var(--paper-2);border-radius:10px;background:var(--paper);padding:10px 12px;font-size:12px;line-height:1.7">
+          ${citations.length ? citations.map(cit => `<div>${escHtml(cit)}</div>`).join('') : '<span style="color:var(--ink-4)">暂无 last_citations</span>'}
+        </div>
+      </div>
+    </div>
+    <div style="margin-bottom:14px">
+      <div class="section-title" style="margin-bottom:8px">ragz_messages 原始消息</div>
+      <div style="max-height:220px;overflow:auto;border:1px solid var(--paper-2);border-radius:10px;background:var(--paper)">
+        ${ragMessages.length ? ragMessages.map(m => `<div style="padding:10px 12px;border-bottom:1px solid var(--paper-2);font-size:12px;line-height:1.5">
+          <strong>${escHtml(m.role || '-')}</strong>
+          <span style="color:var(--ink-4);margin-left:8px">${fmtDate(m.created_at)}</span>
+          <div style="margin-top:4px">${escHtml(m.content || '')}</div>
+          ${m.sources && Object.keys(m.sources).length ? `<pre style="margin-top:6px;background:var(--ink);color:#a8b3cf;border-radius:6px;padding:8px;white-space:pre-wrap;word-break:break-all">${escHtml(JSON.stringify(m.sources, null, 2))}</pre>` : ''}
+        </div>`).join('') : '<div style="padding:16px;color:var(--ink-4);font-size:12px">暂无 ragz_messages</div>'}
+      </div>
+    </div>
+    <div style="margin-bottom:14px">
+      <div class="section-title" style="margin-bottom:8px">promotion_kefu_message</div>
+      <div style="max-height:170px;overflow:auto;border:1px solid var(--paper-2);border-radius:10px;background:var(--paper)">
+        ${kefuMessages.length ? kefuMessages.map(m => `<div style="padding:10px 12px;border-bottom:1px solid var(--paper-2);font-size:12px;line-height:1.5">
+          <strong>sender_type=${m.sender_type}</strong>
+          <span style="color:var(--ink-4);margin-left:8px">${fmtDate(m.create_time)}</span>
+          <div style="margin-top:4px">${escHtml(m.content || '')}</div>
+        </div>`).join('') : '<div style="padding:16px;color:var(--ink-4);font-size:12px">暂无客服消息</div>'}
+      </div>
+    </div>
+    <div style="margin-bottom:14px">
+      <div class="section-title" style="margin-bottom:8px">metadata JSON</div>
+      <pre style="background:var(--ink);color:#a8b3cf;border-radius:10px;padding:12px;max-height:240px;overflow:auto;white-space:pre-wrap;word-break:break-all;font-size:11px">${escHtml(JSON.stringify(metadata, null, 2))}</pre>
+    </div>
+    <div style="border-top:1px solid var(--paper-2);padding-top:14px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px">
+        <button class="btn btn-emerald" onclick="acceptKefuRequest(${c.id})" ${canAccept ? '' : 'disabled'}>接入</button>
+        <button class="btn btn-amber" onclick="closeKefuRequest(${c.id})" ${canClose ? '' : 'disabled'}>关闭请求</button>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <input id="kefu-close-reason" placeholder="close_reason" style="padding:10px 12px;border:1px solid var(--paper-3);border-radius:10px;background:var(--paper)" />
+        <input id="kefu-resolution-note" placeholder="resolution_note" style="padding:10px 12px;border:1px solid var(--paper-3);border-radius:10px;background:var(--paper)" />
+      </div>
+    </div>`;
+}
+
+async function acceptKefuRequest(conversationId) {
+  await getAdminToken();
+  const res = await apiPost(`${API_CONFIG.ENDPOINTS.KEFU_HANDOFF_REQUESTS}/${conversationId}/accept`, {});
+  showToast(res.ok ? '已接入请求' : '接入失败', res.ok ? 'success' : 'error');
+  if (res.ok) await loadKefuDetail(conversationId);
+}
+
+async function closeKefuRequest(conversationId) {
+  await getAdminToken();
+  const closeReason = document.getElementById('kefu-close-reason')?.value || '';
+  const resolutionNote = document.getElementById('kefu-resolution-note')?.value || '';
+  const res = await apiPost(`${API_CONFIG.ENDPOINTS.KEFU_HANDOFF_REQUESTS}/${conversationId}/close`, {
+    close_reason: closeReason,
+    resolution_note: resolutionNote,
+  });
+  showToast(res.ok ? '请求已关闭' : '关闭失败', res.ok ? 'success' : 'error');
+  if (res.ok) await loadKefuDetail(conversationId);
 }
 
 // ── Testing ──────────────────────────────────────────────────────

@@ -22,6 +22,11 @@ class MessageRecord:
     tokens: Optional[int]
     latency_ms: Optional[int]
     created_at: datetime
+    member_user_id: Optional[int] = None
+    kefu_conversation_id: Optional[int] = None
+    kefu_message_id: Optional[int] = None
+    sender_type: Optional[int] = None
+    tenant_id: int = 0
 
 
 class MessageRepository:
@@ -37,15 +42,69 @@ class MessageRepository:
         sources: dict | None = None,
         tokens: int | None = None,
         latency_ms: int | None = None,
+        member_user_id: int | None = None,
+        kefu_conversation_id: int | None = None,
+        kefu_message_id: int | None = None,
+        sender_type: int | None = None,
+        tenant_id: int = 0,
     ) -> MessageRecord:
         async with self.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute(
-                    """INSERT INTO ragz_messages
-                    (session_id, role, content, intent, sources, tokens, latency_ms)
-                    VALUES (%s, %s, %s, %s, %s, %s, %s)""",
-                    (session_id, role, content, intent, json_module.dumps(sources or {}), tokens, latency_ms),
+                has_handoff_fields = any(
+                    value is not None
+                    for value in (
+                        member_user_id,
+                        kefu_conversation_id,
+                        kefu_message_id,
+                        sender_type,
+                    )
                 )
+                if has_handoff_fields:
+                    try:
+                        await cur.execute(
+                            """INSERT INTO ragz_messages
+                            (session_id, role, content, intent, sources, tokens, latency_ms,
+                             member_user_id, kefu_conversation_id, kefu_message_id, sender_type, tenant_id)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+                            (
+                                session_id,
+                                role,
+                                content,
+                                intent,
+                                json_module.dumps(sources or {}, ensure_ascii=False),
+                                tokens,
+                                latency_ms,
+                                member_user_id,
+                                kefu_conversation_id,
+                                kefu_message_id,
+                                sender_type,
+                                tenant_id,
+                            ),
+                        )
+                    except Exception as e:
+                        if "Unknown column" not in str(e):
+                            raise
+                        await cur.execute(
+                            """INSERT INTO ragz_messages
+                            (session_id, role, content, intent, sources, tokens, latency_ms)
+                            VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                            (
+                                session_id,
+                                role,
+                                content,
+                                intent,
+                                json_module.dumps(sources or {}, ensure_ascii=False),
+                                tokens,
+                                latency_ms,
+                            ),
+                        )
+                else:
+                    await cur.execute(
+                        """INSERT INTO ragz_messages
+                        (session_id, role, content, intent, sources, tokens, latency_ms)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+                        (session_id, role, content, intent, json_module.dumps(sources or {}, ensure_ascii=False), tokens, latency_ms),
+                    )
                 last_id = cur.lastrowid
                 await cur.execute("SELECT * FROM ragz_messages WHERE id = %s", (last_id,))
                 row = await cur.fetchone()
@@ -107,4 +166,9 @@ class MessageRepository:
             tokens=row.get("tokens"),
             latency_ms=row.get("latency_ms"),
             created_at=row["created_at"],
+            member_user_id=row.get("member_user_id"),
+            kefu_conversation_id=row.get("kefu_conversation_id"),
+            kefu_message_id=row.get("kefu_message_id"),
+            sender_type=row.get("sender_type"),
+            tenant_id=row.get("tenant_id") or 0,
         )

@@ -29,6 +29,8 @@ class SessionContext:
     history: list[dict]
     last_query_hash: Optional[str]
     product_context: Optional[dict] = None  # 商品上下文 {sku_id, spu_id, product_info}
+    member_user_id: Optional[int] = None
+    tenant_id: int = 0
 
 
 class SessionService:
@@ -79,6 +81,8 @@ class SessionService:
                     history=history,
                     last_query_hash=cached.get("last_query_hash"),
                     product_context=product_context,
+                    member_user_id=cached.get("member_user_id"),
+                    tenant_id=cached.get("tenant_id", 0),
                 )
             # 尝试从 DB 读取
             db_session = await self._session_repo.find_by_id(session_id)
@@ -97,6 +101,8 @@ class SessionService:
                     "user_id": db_session.user_id,
                     "intent": db_session.intent,
                     "last_query_hash": db_session.summary,
+                    "member_user_id": db_session.member_user_id,
+                    "tenant_id": db_session.tenant_id,
                 })
                 return SessionContext(
                     session_id=session_id,
@@ -105,14 +111,23 @@ class SessionService:
                     history=history_dicts,
                     last_query_hash=db_session.summary,
                     product_context=product_context,
+                    member_user_id=db_session.member_user_id,
+                    tenant_id=db_session.tenant_id,
                 )
 
         # 创建新会话
-        new_session = await self._session_repo.create(user_id)
+        member_user_id = int(user_id) if str(user_id).isdigit() else None
+        new_session = await self._session_repo.create(
+            user_id,
+            member_user_id=member_user_id,
+            tenant_id=0,
+        )
         await self._cache.set(new_session.id, {
             "user_id": user_id,
             "intent": None,
             "last_query_hash": None,
+            "member_user_id": new_session.member_user_id,
+            "tenant_id": new_session.tenant_id,
         })
         return SessionContext(
             session_id=new_session.id,
@@ -121,6 +136,8 @@ class SessionService:
             history=[],
             last_query_hash=None,
             product_context=product_context,
+            member_user_id=new_session.member_user_id,
+            tenant_id=new_session.tenant_id,
         )
 
     async def add_message(

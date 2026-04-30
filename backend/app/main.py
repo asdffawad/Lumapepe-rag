@@ -31,7 +31,7 @@ from app.services.reranker import MockReranker, MMRReranker
 from app.services.prompt_builder import MockPromptBuilder, EcommercePromptBuilder
 from app.services.llm_generator import MockLLMGenerator, StandardLLMGenerator
 from app.services.stt_service import STTFactory, STTConfig as STTServiceConfig
-from app.api import chat, intent, health, admin, debug, websocket, product, voice_ws
+from app.api import chat, intent, health, admin, debug, websocket, product, voice_ws, kefu
 from app import metrics
 from app.logging_config import get_logger as _get_logger
 
@@ -347,6 +347,7 @@ def create_app() -> FastAPI:
     app.include_router(intent.router)
     app.include_router(health.router)
     app.include_router(admin.router)
+    app.include_router(kefu.router)
     app.include_router(debug.router)
     app.include_router(websocket.router)
     app.include_router(voice_ws.router)
