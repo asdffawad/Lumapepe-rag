@@ -13,11 +13,12 @@ from datetime import datetime
 from typing import Any
 
 import aiomysql
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, WebSocket, WebSocketDisconnect, status
 from pydantic import BaseModel, Field
 
 from app.database.connection import get_db_pool
-from app.middleware.auth import AuthUser, get_admin_user, get_current_user
+from app.middleware.auth import AuthUser, JWTError, get_admin_user, get_current_user, verify_ws_token
+from app.api.kefu_ws_manager import get_kefu_connection_manager
 
 
 router = APIRouter(tags=["kefu"])
@@ -42,6 +43,11 @@ class HandoffRequest(BaseModel):
 class HandoffCloseRequest(BaseModel):
     close_reason: str | None = Field(None, max_length=64)
     resolution_note: str | None = Field(None, max_length=1000)
+
+
+class KefuMessageSendRequest(BaseModel):
+    content: str = Field(..., min_length=1, max_length=2048)
+    content_type: int = Field(CONTENT_TEXT, ge=1)
 
 
 def _parse_json(value: Any) -> dict:
@@ -75,6 +81,42 @@ def _truncate(text: str | None, limit: int = 2048) -> str:
     if not value:
         return "用户请求转人工客服"
     return value[:limit]
+
+
+def _jsonable(value: Any) -> Any:
+    if isinstance(value, datetime):
+        return value.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(value, dict):
+        return {key: _jsonable(val) for key, val in value.items()}
+    if isinstance(value, list):
+        return [_jsonable(item) for item in value]
+    return value
+
+
+def _message_event(conversation_id: int, message: dict) -> dict:
+    return {
+        "event": "message.new",
+        "conversation_id": int(conversation_id),
+        "message": _jsonable(message),
+    }
+
+
+def _status_event(conversation_id: int, handoff_status: int, conversation_status: int | None) -> dict:
+    return {
+        "event": "handoff.status_changed",
+        "conversation_id": int(conversation_id),
+        "handoff_status": handoff_status,
+        "conversation_status": conversation_status,
+    }
+
+
+def _ws_subprotocol(websocket: WebSocket) -> str | None:
+    raw = websocket.headers.get("sec-websocket-protocol", "")
+    if isinstance(raw, list):
+        raw = raw[0] if raw else ""
+    if raw and "," in raw:
+        return raw.split(",")[0].strip()
+    return raw or None
 
 
 def _handoff_status_from_conversation(conversation: dict | None) -> int:
@@ -456,6 +498,128 @@ class KefuRepository:
             "kefu_messages": kefu_messages,
         }
 
+    async def get_session_by_conversation(self, conversation_id: int) -> dict | None:
+        async with self.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    "SELECT * FROM ragz_sessions WHERE kefu_conversation_id = %s ORDER BY handoff_at DESC LIMIT 1",
+                    (conversation_id,),
+                )
+                row = await cur.fetchone()
+        if row:
+            row["metadata"] = _parse_json(row.get("metadata"))
+        return row
+
+    async def list_kefu_messages(self, conversation_id: int, limit: int = 50) -> list[dict]:
+        async with self.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute(
+                    """
+                    SELECT id, conversation_id, sender_id, sender_type, receiver_id, receiver_type,
+                           content_type, content, read_status, create_time, update_time, tenant_id
+                    FROM promotion_kefu_message
+                    WHERE conversation_id = %s AND deleted = b'0'
+                    ORDER BY create_time DESC, id DESC
+                    LIMIT %s
+                    """,
+                    (conversation_id, limit),
+                )
+                rows = await cur.fetchall()
+        return list(reversed(rows))
+
+    async def create_user_kefu_message(
+        self,
+        conversation: dict,
+        member_user: dict,
+        content: str,
+        content_type: int = CONTENT_TEXT,
+    ) -> dict:
+        receiver_id = conversation.get("assigned_admin_id") or 0
+        message = await self.insert_kefu_message(
+            conversation_id=conversation["id"],
+            sender_id=member_user["id"],
+            sender_type=SENDER_USER,
+            receiver_id=receiver_id,
+            receiver_type=SENDER_ADMIN,
+            content=content,
+            tenant_id=conversation.get("tenant_id") or member_user.get("tenant_id") or 0,
+        )
+        await self._update_conversation_last_message(
+            conversation["id"],
+            content=content,
+            content_type=content_type,
+            unread_field="admin_unread_message_count",
+        )
+        message["content_type"] = content_type
+        return message
+
+    async def create_admin_kefu_message(
+        self,
+        conversation: dict,
+        admin_user: dict,
+        content: str,
+        content_type: int = CONTENT_TEXT,
+    ) -> dict:
+        if int(conversation.get("status") or 0) == 2:
+            raise ValueError("CONVERSATION_CLOSED")
+        if int(conversation.get("status") or 0) != 1:
+            raise PermissionError("CONVERSATION_NOT_ACCEPTED")
+        assigned_admin_id = conversation.get("assigned_admin_id")
+        if assigned_admin_id and int(assigned_admin_id) != int(admin_user["id"]):
+            raise PermissionError("ADMIN_NOT_ASSIGNED")
+
+        message = await self.insert_kefu_message(
+            conversation_id=conversation["id"],
+            sender_id=admin_user["id"],
+            sender_type=SENDER_ADMIN,
+            receiver_id=conversation["user_id"],
+            receiver_type=SENDER_USER,
+            content=content,
+            tenant_id=conversation.get("tenant_id") or admin_user.get("tenant_id") or 0,
+        )
+        await self._update_conversation_last_message(
+            conversation["id"],
+            content=content,
+            content_type=content_type,
+            unread_field="user_unread_message_count",
+        )
+        message["content_type"] = content_type
+        return message
+
+    async def _update_conversation_last_message(
+        self,
+        conversation_id: int,
+        *,
+        content: str,
+        content_type: int,
+        unread_field: str | None = None,
+    ) -> None:
+        assignments = [
+            "last_message_content = %s",
+            "last_message_time = NOW()",
+            "last_message_content_type = %s",
+            "updater = 'rag_handoff'",
+        ]
+        params: list[Any] = [_truncate(content), content_type]
+        if unread_field:
+            assignments.append(f"{unread_field} = COALESCE({unread_field}, 0) + 1")
+        params.append(conversation_id)
+        sql = f"UPDATE promotion_kefu_conversation SET {', '.join(assignments)} WHERE id = %s"
+
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                try:
+                    await cur.execute(sql, tuple(params))
+                except Exception as e:
+                    if not unread_field or "Unknown column" not in str(e):
+                        raise
+                    fallback_assignments = assignments[:-1]
+                    fallback_params = [_truncate(content), content_type, conversation_id]
+                    await cur.execute(
+                        f"UPDATE promotion_kefu_conversation SET {', '.join(fallback_assignments)} WHERE id = %s",
+                        tuple(fallback_params),
+                    )
+
     async def accept_conversation(self, conversation_id: int, admin_id: int) -> dict:
         async with self.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
@@ -532,6 +696,55 @@ def _build_handoff_metadata(
     if extra:
         handoff.update(extra)
     return {"handoff": handoff}
+
+
+def _require_conversation(conversation: dict | None) -> dict:
+    if not conversation:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "CONVERSATION_NOT_FOUND", "message": "客服会话不存在"},
+        )
+    return conversation
+
+
+async def _get_user_conversation(
+    repo: KefuRepository,
+    conversation_id: int,
+    current_user: AuthUser,
+) -> tuple[dict, dict, dict | None]:
+    conversation = _require_conversation(await repo.get_conversation(conversation_id))
+    member_user = await repo.resolve_member_user(current_user.user_id)
+    if not member_user or int(conversation.get("user_id") or 0) != int(member_user["id"]):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "CONVERSATION_ACCESS_DENIED", "message": "无权访问该客服会话"},
+        )
+    ragz_session = await repo.get_session_by_conversation(conversation_id)
+    return conversation, member_user, ragz_session
+
+
+async def _get_admin_actor(repo: KefuRepository, current_user: AuthUser) -> dict:
+    admin_user = await repo.resolve_admin_user(current_user.user_id)
+    if not admin_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail={"code": "ADMIN_USER_NOT_FOUND", "message": "当前管理员无法匹配 system_users"},
+        )
+    return admin_user
+
+
+def _raise_send_error(exc: Exception) -> None:
+    if isinstance(exc, ValueError) and str(exc) == "CONVERSATION_CLOSED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "CONVERSATION_CLOSED", "message": "客服会话已关闭，不能继续发送消息"},
+        ) from exc
+    if isinstance(exc, PermissionError):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": str(exc) or "KEFU_SEND_DENIED", "message": "当前客服不能发送该会话消息"},
+        ) from exc
+    raise exc
 
 
 @router.post("/api/kefu/handoff/request")
@@ -630,6 +843,25 @@ async def get_handoff_status(
     }
 
 
+@router.get("/api/kefu/conversations/{conversation_id}/messages")
+async def get_user_kefu_messages(
+    conversation_id: int,
+    limit: int = Query(50, ge=1, le=100),
+    current_user: AuthUser = Depends(get_current_user),
+    repo: KefuRepository = Depends(get_kefu_repo),
+):
+    conversation, member_user, ragz_session = await _get_user_conversation(repo, conversation_id, current_user)
+    messages = await repo.list_kefu_messages(conversation_id, limit=limit)
+    return {
+        "conversation": _jsonable(conversation),
+        "member_user": _jsonable(member_user),
+        "handoff_status": (ragz_session or {}).get("handoff_status", _handoff_status_from_conversation(conversation)),
+        "assigned_admin_id": conversation.get("assigned_admin_id"),
+        "is_accepted": int(conversation.get("status") or 0) == 1,
+        "messages": _jsonable(messages),
+    }
+
+
 @router.get("/api/admin/kefu/handoff/requests")
 async def list_handoff_requests(
     limit: int = Query(50, ge=1, le=100),
@@ -654,6 +886,47 @@ async def get_handoff_request_detail(
             detail={"code": "HANDOFF_NOT_FOUND", "message": "转人工请求不存在"},
         )
     return detail
+
+
+@router.get("/api/admin/kefu/conversations/{conversation_id}/messages")
+async def get_admin_kefu_messages(
+    conversation_id: int,
+    limit: int = Query(50, ge=1, le=100),
+    current_user: AuthUser = Depends(get_admin_user),
+    repo: KefuRepository = Depends(get_kefu_repo),
+):
+    detail = await repo.get_handoff_detail(conversation_id, message_limit=limit)
+    if not detail:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail={"code": "CONVERSATION_NOT_FOUND", "message": "客服会话不存在"},
+        )
+    detail["messages"] = await repo.list_kefu_messages(conversation_id, limit=limit)
+    return _jsonable(detail)
+
+
+@router.post("/api/admin/kefu/conversations/{conversation_id}/messages")
+async def send_admin_kefu_message(
+    conversation_id: int,
+    request: KefuMessageSendRequest,
+    current_user: AuthUser = Depends(get_admin_user),
+    repo: KefuRepository = Depends(get_kefu_repo),
+):
+    conversation = _require_conversation(await repo.get_conversation(conversation_id))
+    admin_user = await _get_admin_actor(repo, current_user)
+    try:
+        message = await repo.create_admin_kefu_message(
+            conversation,
+            admin_user,
+            request.content,
+            content_type=request.content_type,
+        )
+    except Exception as exc:
+        _raise_send_error(exc)
+
+    manager = get_kefu_connection_manager()
+    await manager.send_to_user(conversation_id, _message_event(conversation_id, message))
+    return {"conversation_id": conversation_id, "message": _jsonable(message)}
 
 
 @router.post("/api/admin/kefu/handoff/requests/{conversation_id}/accept")
@@ -688,7 +961,7 @@ async def accept_handoff_request(
             extra={"accepted_at": datetime.now().isoformat(), "admin_id": admin_user["id"]},
         ),
     )
-    await repo.insert_kefu_message(
+    system_message = await repo.insert_kefu_message(
         conversation_id=conversation_id,
         sender_id=0,
         sender_type=SENDER_SYSTEM,
@@ -697,6 +970,19 @@ async def accept_handoff_request(
         content=f"客服 {admin_user.get('nickname') or admin_user.get('username') or admin_user['id']} 已接入",
         tenant_id=conversation.get("tenant_id") or 0,
     )
+    manager = get_kefu_connection_manager()
+    await manager.broadcast_conversation(conversation_id, {
+        "event": "conversation.accepted",
+        "conversation_id": conversation_id,
+        "conversation_status": conversation.get("status"),
+        "handoff_status": HANDOFF_ACCEPTED,
+        "assigned_admin_id": conversation.get("assigned_admin_id"),
+    })
+    await manager.broadcast_conversation(
+        conversation_id,
+        _status_event(conversation_id, HANDOFF_ACCEPTED, conversation.get("status")),
+    )
+    await manager.broadcast_conversation(conversation_id, _message_event(conversation_id, system_message))
 
     return {
         "kefu_conversation_id": conversation_id,
@@ -738,7 +1024,7 @@ async def close_handoff_request(
         ),
     )
     note = request.resolution_note or ""
-    await repo.insert_kefu_message(
+    system_message = await repo.insert_kefu_message(
         conversation_id=conversation_id,
         sender_id=0,
         sender_type=SENDER_SYSTEM,
@@ -747,6 +1033,21 @@ async def close_handoff_request(
         content=f"客服请求已关闭。原因：{request.close_reason or '未填写'}。{note}",
         tenant_id=conversation.get("tenant_id") or 0,
     )
+    manager = get_kefu_connection_manager()
+    await manager.broadcast_conversation(conversation_id, {
+        "event": "conversation.closed",
+        "conversation_id": conversation_id,
+        "conversation_status": conversation.get("status"),
+        "handoff_status": HANDOFF_CLOSED,
+        "close_reason": request.close_reason,
+        "resolution_note": request.resolution_note,
+        "closed_at": closed_at,
+    })
+    await manager.broadcast_conversation(
+        conversation_id,
+        _status_event(conversation_id, HANDOFF_CLOSED, conversation.get("status")),
+    )
+    await manager.broadcast_conversation(conversation_id, _message_event(conversation_id, system_message))
 
     return {
         "kefu_conversation_id": conversation_id,
@@ -754,3 +1055,157 @@ async def close_handoff_request(
         "handoff_status": HANDOFF_CLOSED,
         "closed_at": closed_at,
     }
+
+
+@router.websocket("/ws/kefu/user")
+async def websocket_kefu_user(
+    websocket: WebSocket,
+    conversation_id: int = Query(...),
+    repo: KefuRepository = Depends(get_kefu_repo),
+):
+    subprotocol = _ws_subprotocol(websocket)
+    try:
+        auth_user = await verify_ws_token(dict(websocket.headers))
+    except JWTError as exc:
+        await websocket.close(code=4001, reason=str(exc))
+        return
+
+    await websocket.accept(subprotocol=subprotocol)
+    if auth_user.role != "user":
+        await websocket.send_json({"event": "error", "code": "ROLE_DENIED", "message": "用户 WebSocket 需要 user 身份"})
+        await websocket.close(code=4003, reason="ROLE_DENIED")
+        return
+
+    try:
+        conversation, member_user, ragz_session = await _get_user_conversation(repo, conversation_id, auth_user)
+    except HTTPException as exc:
+        detail = exc.detail if isinstance(exc.detail, dict) else {"message": str(exc.detail)}
+        await websocket.send_json({"event": "error", **detail})
+        await websocket.close(code=4003, reason=detail.get("code", "ACCESS_DENIED"))
+        return
+
+    manager = get_kefu_connection_manager()
+    await manager.connect_user(websocket, conversation_id)
+    await websocket.send_json({
+        "event": "connected",
+        "conversation_id": conversation_id,
+        "handoff_status": (ragz_session or {}).get("handoff_status", _handoff_status_from_conversation(conversation)),
+        "conversation_status": conversation.get("status"),
+        "assigned_admin_id": conversation.get("assigned_admin_id"),
+    })
+
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            event = payload.get("event")
+            if event == "ping":
+                await websocket.send_json({"event": "pong", "timestamp": payload.get("timestamp")})
+                continue
+            if event != "message.send":
+                await websocket.send_json({"event": "error", "code": "INVALID_EVENT", "message": f"未知事件: {event}"})
+                continue
+
+            content = str(payload.get("content") or "").strip()
+            client_msg_id = payload.get("client_msg_id")
+            if not content:
+                await websocket.send_json({"event": "error", "code": "EMPTY_CONTENT", "message": "消息内容不能为空"})
+                continue
+
+            conversation = _require_conversation(await repo.get_conversation(conversation_id))
+            if int(conversation.get("status") or 0) == 2:
+                await websocket.send_json({"event": "error", "code": "CONVERSATION_CLOSED", "message": "客服会话已关闭"})
+                continue
+
+            message = await repo.create_user_kefu_message(conversation, member_user, content)
+            await websocket.send_json({
+                "event": "message.ack",
+                "client_msg_id": client_msg_id,
+                "message_id": message["id"],
+                "conversation_id": conversation_id,
+            })
+            await manager.send_to_admin(conversation_id, _message_event(conversation_id, message))
+    except WebSocketDisconnect:
+        pass
+    finally:
+        manager.disconnect(websocket)
+
+
+@router.websocket("/ws/kefu/admin")
+async def websocket_kefu_admin(
+    websocket: WebSocket,
+    conversation_id: int = Query(...),
+    repo: KefuRepository = Depends(get_kefu_repo),
+):
+    subprotocol = _ws_subprotocol(websocket)
+    try:
+        auth_user = await verify_ws_token(dict(websocket.headers))
+    except JWTError as exc:
+        await websocket.close(code=4001, reason=str(exc))
+        return
+
+    await websocket.accept(subprotocol=subprotocol)
+    if auth_user.role != "admin":
+        await websocket.send_json({"event": "error", "code": "ROLE_DENIED", "message": "客服 WebSocket 需要 admin 身份"})
+        await websocket.close(code=4003, reason="ROLE_DENIED")
+        return
+
+    conversation = await repo.get_conversation(conversation_id)
+    if not conversation:
+        await websocket.send_json({"event": "error", "code": "CONVERSATION_NOT_FOUND", "message": "客服会话不存在"})
+        await websocket.close(code=4004, reason="CONVERSATION_NOT_FOUND")
+        return
+    admin_user = await repo.resolve_admin_user(auth_user.user_id)
+    if not admin_user:
+        await websocket.send_json({"event": "error", "code": "ADMIN_USER_NOT_FOUND", "message": "当前管理员无法匹配 system_users"})
+        await websocket.close(code=4003, reason="ADMIN_USER_NOT_FOUND")
+        return
+
+    manager = get_kefu_connection_manager()
+    await manager.connect_admin(websocket, conversation_id)
+    await websocket.send_json({
+        "event": "connected",
+        "conversation_id": conversation_id,
+        "conversation_status": conversation.get("status"),
+        "assigned_admin_id": conversation.get("assigned_admin_id"),
+    })
+
+    try:
+        while True:
+            payload = await websocket.receive_json()
+            event = payload.get("event")
+            if event == "ping":
+                await websocket.send_json({"event": "pong", "timestamp": payload.get("timestamp")})
+                continue
+            if event != "message.send":
+                await websocket.send_json({"event": "error", "code": "INVALID_EVENT", "message": f"未知事件: {event}"})
+                continue
+
+            content = str(payload.get("content") or "").strip()
+            client_msg_id = payload.get("client_msg_id")
+            if not content:
+                await websocket.send_json({"event": "error", "code": "EMPTY_CONTENT", "message": "消息内容不能为空"})
+                continue
+
+            conversation = _require_conversation(await repo.get_conversation(conversation_id))
+            try:
+                message = await repo.create_admin_kefu_message(conversation, admin_user, content)
+            except Exception as exc:
+                if isinstance(exc, ValueError) and str(exc) == "CONVERSATION_CLOSED":
+                    await websocket.send_json({"event": "error", "code": "CONVERSATION_CLOSED", "message": "客服会话已关闭，不能继续发送消息"})
+                    continue
+                if isinstance(exc, PermissionError):
+                    await websocket.send_json({"event": "error", "code": str(exc) or "KEFU_SEND_DENIED", "message": "当前客服不能发送该会话消息"})
+                    continue
+                raise
+
+            await websocket.send_json({
+                "event": "message.ack",
+                "client_msg_id": client_msg_id,
+                "message_id": message["id"],
+                "conversation_id": conversation_id,
+            })
+            await manager.send_to_user(conversation_id, _message_event(conversation_id, message))
+    except WebSocketDisconnect:
+        pass
+    finally:
+        manager.disconnect(websocket)

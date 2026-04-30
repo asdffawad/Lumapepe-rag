@@ -1201,10 +1201,12 @@
 
             // WebSocket 路径
             WS_CHAT: '/ws/chat',
+            WS_KEFU_USER: '/ws/kefu/user',
 
             // 转人工
             HANDOFF_REQUEST: '/api/kefu/handoff/request',
             HANDOFF_STATUS: '/api/kefu/handoff/status',
+            KEFU_MESSAGES: (conversationId) => `/api/kefu/conversations/${conversationId}/messages`,
 
             // 健康检查
             HEALTH: '/api/v1/health'
@@ -1540,9 +1542,13 @@
     // ==================== 状态 ====================
     const state = {
         ws: null,
+        kefuWs: null,
+        kefuConnecting: false,
+        kefuHistoryLoadedFor: null,
         token: null,
         sessionId: null,
         userId: 'user-' + Math.random().toString(36).substr(2, 8),
+        chatMode: 'ai',
         handoffStatus: 0,
         kefuConversationId: null,
         handoffLoading: false,
@@ -1689,6 +1695,13 @@
                 dom.sessionCount.textContent = state.sessionId?.substr(0, 8) || '-';
                 state.accumulatedResponse = '';
                 break;
+            case 'handoff_message_received':
+                updateHandoffUi({
+                    handoff_status: data.handoff_status,
+                    kefu_conversation_id: data.kefu_conversation_id,
+                });
+                showToast(data.message || '已发送给人工客服', 'info');
+                break;
             case 'connected':
                 if (data.session_id && state.sessionId) {
                     dom.sessionCount.textContent = state.sessionId?.substr(0, 8) || '-';
@@ -1729,6 +1742,20 @@
     }
 
     function handleDone(data) {
+        if (data.intent === 'human_handoff') {
+            if (state.currentPlaceholder) {
+                const contentEl = state.currentPlaceholder.querySelector('.message-content');
+                if (contentEl) contentEl.textContent = '已转入人工客服通道';
+            }
+            updateHandoffUi({
+                handoff_status: data.handoff_status,
+                kefu_conversation_id: data.kefu_conversation_id,
+            });
+            state.currentPlaceholder = null;
+            state.accumulatedResponse = '';
+            dom.sendBtn.disabled = false;
+            return;
+        }
         if (state.currentPlaceholder) {
             const contentEl = state.currentPlaceholder.querySelector('.message-content');
             if (contentEl) {
@@ -1863,6 +1890,7 @@
             state.kefuConversationId = data.kefu_conversation_id || null;
         }
         const statusValue = Number(state.handoffStatus || 0);
+        state.chatMode = statusValue === 1 ? 'waiting_human' : statusValue === 2 ? 'human' : 'ai';
         dom.handoffStatusText.textContent = isError ? '转人工状态获取失败' : handoffText(statusValue);
         dom.handoffStatusText.className = 'handoff-status';
         if (isError) dom.handoffStatusText.classList.add('error');
@@ -1874,6 +1902,13 @@
         dom.handoffBtn.title = state.kefuConversationId
             ? `客服会话 #${state.kefuConversationId}`
             : '转人工客服';
+        if (!isError && state.kefuConversationId && (statusValue === 1 || statusValue === 2)) {
+            connectKefuUserWebSocket(state.kefuConversationId);
+            loadKefuHistory(state.kefuConversationId);
+        }
+        if (statusValue === 3) {
+            closeKefuUserWebSocket();
+        }
     }
 
     async function refreshHandoffStatus(silent = true) {
@@ -1920,6 +1955,132 @@
             updateHandoffUi(null, true);
             const detail = res.data?.detail;
             showToast(detail?.message || res.error || '转人工请求失败', 'error');
+        }
+    }
+
+    function closeKefuUserWebSocket() {
+        if (state.kefuWs) {
+            state.kefuWs.close();
+            state.kefuWs = null;
+        }
+        state.kefuConnecting = false;
+    }
+
+    function connectKefuUserWebSocket(conversationId) {
+        if (!state.token || !conversationId) return;
+        if (state.kefuWs && state.kefuWs.readyState === WebSocket.OPEN && Number(state.kefuConversationId) === Number(conversationId)) {
+            return;
+        }
+        if (state.kefuConnecting) return;
+
+        closeKefuUserWebSocket();
+        state.kefuConnecting = true;
+        state.kefuConversationId = conversationId;
+
+        const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const wsUrl = `${protocol}//${window.location.host}${API_CONFIG.ENDPOINTS.WS_KEFU_USER}?conversation_id=${encodeURIComponent(conversationId)}`;
+        state.kefuWs = new WebSocket(wsUrl, ['bearer', state.token]);
+
+        state.kefuWs.onopen = () => {
+            state.kefuConnecting = false;
+            console.debug('[KefuWS] Connected:', conversationId);
+        };
+        state.kefuWs.onmessage = (event) => {
+            try {
+                handleKefuEvent(JSON.parse(event.data));
+            } catch (e) {
+                console.error('[KefuWS] Failed to parse message:', e);
+            }
+        };
+        state.kefuWs.onerror = () => {
+            state.kefuConnecting = false;
+            showToast('人工客服连接异常', 'error');
+        };
+        state.kefuWs.onclose = () => {
+            state.kefuConnecting = false;
+            state.kefuWs = null;
+        };
+    }
+
+    async function loadKefuHistory(conversationId) {
+        if (!state.token || !conversationId || state.kefuHistoryLoadedFor === Number(conversationId)) return;
+        const res = await apiFetch(API_CONFIG.ENDPOINTS.KEFU_MESSAGES(conversationId), {
+            method: 'GET',
+            headers: { 'Authorization': 'Bearer ' + state.token },
+        });
+        if (!res.ok) return;
+        state.kefuHistoryLoadedFor = Number(conversationId);
+        (res.data.messages || []).forEach(message => {
+            if (Number(message.sender_type) === 1) {
+                addMessage('user', escapeHtml(message.content || ''));
+            } else if (Number(message.sender_type) === 2) {
+                addMessage('assistant', escapeHtml('人工客服：' + (message.content || '')));
+            } else if (Number(message.sender_type) === 4) {
+                addMessage('assistant', escapeHtml('系统：' + (message.content || '')));
+            }
+        });
+    }
+
+    function handleKefuEvent(data) {
+        RequestLogger.add({
+            id: 'kefu_ws_' + Date.now(),
+            method: 'WS',
+            url: '/ws/kefu/user',
+            type: 'ws_recv',
+            status: data.event === 'error' ? 0 : 200,
+            response: { body: data }
+        });
+
+        if (data.event === 'connected') {
+            updateHandoffUi({
+                handoff_status: data.handoff_status,
+                kefu_conversation_id: data.conversation_id,
+                conversation_status: data.conversation_status,
+                assigned_admin_id: data.assigned_admin_id,
+            });
+            return;
+        }
+        if (data.event === 'message.new' && data.message) {
+            const m = data.message;
+            if (Number(m.sender_type) === 2) {
+                addMessage('assistant', escapeHtml('人工客服：' + (m.content || '')));
+            } else if (Number(m.sender_type) === 4) {
+                addMessage('assistant', escapeHtml('系统：' + (m.content || '')));
+            }
+            return;
+        }
+        if (data.event === 'message.ack') {
+            return;
+        }
+        if (data.event === 'conversation.accepted') {
+            updateHandoffUi({
+                handoff_status: 2,
+                kefu_conversation_id: data.conversation_id,
+                conversation_status: data.conversation_status,
+                assigned_admin_id: data.assigned_admin_id,
+            });
+            showToast('人工客服已接入', 'success');
+            return;
+        }
+        if (data.event === 'conversation.closed') {
+            updateHandoffUi({
+                handoff_status: 3,
+                kefu_conversation_id: data.conversation_id,
+                conversation_status: data.conversation_status,
+            });
+            showToast('人工客服已结束，可继续咨询 AI 客服', 'info');
+            return;
+        }
+        if (data.event === 'handoff.status_changed') {
+            updateHandoffUi({
+                handoff_status: data.handoff_status,
+                kefu_conversation_id: data.conversation_id,
+                conversation_status: data.conversation_status,
+            });
+            return;
+        }
+        if (data.event === 'error') {
+            showToast(data.message || '人工客服消息处理失败', 'error');
         }
     }
 
@@ -2125,6 +2286,11 @@
         const message = dom.messageInput.value.trim();
         if (!message) return;
 
+        if (state.chatMode === 'waiting_human' || state.chatMode === 'human') {
+            sendKefuUserMessage(message);
+            return;
+        }
+
         if (state.status !== 'connected') {
             showToast('WebSocket 未连接', 'error');
             return;
@@ -2159,6 +2325,32 @@
             session_id: state.sessionId || undefined,
             user_id: state.userId
         }));
+    }
+
+    function sendKefuUserMessage(message) {
+        if (!state.kefuConversationId) {
+            showToast('尚未建立人工客服会话', 'warning');
+            return;
+        }
+        if (!state.kefuWs || state.kefuWs.readyState !== WebSocket.OPEN) {
+            connectKefuUserWebSocket(state.kefuConversationId);
+            showToast('正在连接人工客服，请稍后重试', 'warning');
+            return;
+        }
+
+        dom.messageInput.value = '';
+        addMessage('user', escapeHtml(message));
+        state.msgSent++;
+        updateStats();
+        state.kefuWs.send(JSON.stringify({
+            event: 'message.send',
+            conversation_id: Number(state.kefuConversationId),
+            client_msg_id: (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : String(Date.now()),
+            content: message,
+        }));
+        if (state.chatMode === 'waiting_human') {
+            showToast('已发送给人工客服队列，请等待接入', 'info');
+        }
     }
 
     function addMessage(role, content, isPlaceholder = false) {
@@ -2229,6 +2421,7 @@
     window.addEventListener('beforeunload', () => {
         stopHeartbeat();
         if (state.ws) state.ws.close();
+        if (state.kefuWs) state.kefuWs.close();
     });
 
     // Voice button click (quick record)

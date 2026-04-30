@@ -30,7 +30,9 @@ class SessionContext:
     last_query_hash: Optional[str]
     product_context: Optional[dict] = None  # 商品上下文 {sku_id, spu_id, product_info}
     member_user_id: Optional[int] = None
+    kefu_conversation_id: Optional[int] = None
     tenant_id: int = 0
+    handoff_status: int = 0
 
 
 class SessionService:
@@ -82,7 +84,9 @@ class SessionService:
                     last_query_hash=cached.get("last_query_hash"),
                     product_context=product_context,
                     member_user_id=cached.get("member_user_id"),
+                    kefu_conversation_id=cached.get("kefu_conversation_id"),
                     tenant_id=cached.get("tenant_id", 0),
+                    handoff_status=cached.get("handoff_status", 0),
                 )
             # 尝试从 DB 读取
             db_session = await self._session_repo.find_by_id(session_id)
@@ -102,7 +106,9 @@ class SessionService:
                     "intent": db_session.intent,
                     "last_query_hash": db_session.summary,
                     "member_user_id": db_session.member_user_id,
+                    "kefu_conversation_id": db_session.kefu_conversation_id,
                     "tenant_id": db_session.tenant_id,
+                    "handoff_status": db_session.handoff_status,
                 })
                 return SessionContext(
                     session_id=session_id,
@@ -112,7 +118,9 @@ class SessionService:
                     last_query_hash=db_session.summary,
                     product_context=product_context,
                     member_user_id=db_session.member_user_id,
+                    kefu_conversation_id=db_session.kefu_conversation_id,
                     tenant_id=db_session.tenant_id,
+                    handoff_status=db_session.handoff_status,
                 )
 
         # 创建新会话
@@ -127,7 +135,9 @@ class SessionService:
             "intent": None,
             "last_query_hash": None,
             "member_user_id": new_session.member_user_id,
+            "kefu_conversation_id": new_session.kefu_conversation_id,
             "tenant_id": new_session.tenant_id,
+            "handoff_status": new_session.handoff_status,
         })
         return SessionContext(
             session_id=new_session.id,
@@ -137,7 +147,9 @@ class SessionService:
             last_query_hash=None,
             product_context=product_context,
             member_user_id=new_session.member_user_id,
+            kefu_conversation_id=new_session.kefu_conversation_id,
             tenant_id=new_session.tenant_id,
+            handoff_status=new_session.handoff_status,
         )
 
     async def add_message(

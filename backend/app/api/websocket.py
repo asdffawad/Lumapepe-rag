@@ -344,8 +344,6 @@ async def handle_message(
     spu_id: Optional[int] = None,
 ) -> None:
     """处理聊天消息，流式响应"""
-    orchestrator = get_rag_orchestrator()
-    intent_classifier = get_intent_classifier()
     session_svc = await get_session_service()
 
     # 检查数据库是否可用
@@ -376,6 +374,17 @@ async def handle_message(
             sku_id=sku_id,
             spu_id=spu_id,
         )
+
+        if await _route_to_kefu_if_handoff(
+            websocket=websocket,
+            session_id=ctx.session_id,
+            user_id=user_id,
+            content=content,
+            handoff_hint=getattr(ctx, "handoff_status", 0),
+            conversation_hint=getattr(ctx, "kefu_conversation_id", None),
+        ):
+            return
+
         history = ctx.history[-5:] if ctx.history else []
 
         # 注入商品上下文到历史记录（作为系统消息）
@@ -391,6 +400,9 @@ async def handle_message(
                     "intent": "product_context"
                 })
                 _logger.info("Product context injected into conversation", extra={"product": ctx.product_context.get("product_name")})
+
+        orchestrator = get_rag_orchestrator()
+        intent_classifier = get_intent_classifier()
 
         # 意图分类
         intent_result = await intent_classifier.classify(content, history)
@@ -543,6 +555,96 @@ async def handle_message(
             "code": "MESSAGE_ERROR",
             "message": str(e)
         })
+
+
+async def _route_to_kefu_if_handoff(
+    websocket: WebSocket,
+    session_id: str,
+    user_id: str,
+    content: str,
+    handoff_hint: int | None = None,
+    conversation_hint: int | None = None,
+) -> bool:
+    from app.api.kefu import HANDOFF_ACCEPTED, HANDOFF_PENDING
+
+    session = {
+        "id": session_id,
+        "handoff_status": handoff_hint or 0,
+        "kefu_conversation_id": conversation_hint,
+    }
+    try:
+        from app.api.kefu import KefuRepository, _message_event
+        from app.api.kefu_ws_manager import get_kefu_connection_manager
+
+        repo = KefuRepository(get_db_pool())
+        fresh_session = await repo.get_session(session_id)
+        if fresh_session:
+            session = fresh_session
+    except Exception as exc:
+        if int(session.get("handoff_status") or 0) not in (HANDOFF_PENDING, HANDOFF_ACCEPTED):
+            _logger.debug("Skipping handoff split because session DB lookup is unavailable", extra={"error": str(exc)})
+            return False
+        await websocket.send_json({
+            "type": "error",
+            "code": "KEFU_ROUTE_ERROR",
+            "message": "人工客服消息发送失败",
+        })
+        return True
+
+    try:
+        handoff_status = int((session or {}).get("handoff_status") or 0)
+        conversation_id = (session or {}).get("kefu_conversation_id")
+        if handoff_status not in (HANDOFF_PENDING, HANDOFF_ACCEPTED):
+            return False
+        if not conversation_id:
+            await websocket.send_json({
+                "type": "error",
+                "code": "KEFU_CONVERSATION_MISSING",
+                "message": "当前会话缺少人工客服会话关联",
+            })
+            return True
+
+        member_user = await repo.resolve_member_user(user_id)
+        conversation = await repo.get_conversation(int(conversation_id))
+        if not member_user or not conversation or int(conversation.get("user_id") or 0) != int(member_user["id"]):
+            await websocket.send_json({
+                "type": "error",
+                "code": "KEFU_ACCESS_DENIED",
+                "message": "无权发送该人工客服会话消息",
+            })
+            return True
+
+        message = await repo.create_user_kefu_message(conversation, member_user, content)
+        await websocket.send_json({
+            "type": "handoff_message_received",
+            "session_id": session_id,
+            "handoff_status": handoff_status,
+            "kefu_conversation_id": int(conversation_id),
+            "message_id": message.get("id"),
+            "message": "已发送给人工客服" if handoff_status == HANDOFF_ACCEPTED else "已进入人工客服队列，请等待接入",
+        })
+        await get_kefu_connection_manager().send_to_admin(
+            int(conversation_id),
+            _message_event(int(conversation_id), message),
+        )
+        await websocket.send_json({
+            "type": "done",
+            "session_id": session_id,
+            "intent": "human_handoff",
+            "sources": [],
+            "content_length": 0,
+            "handoff_status": handoff_status,
+            "kefu_conversation_id": int(conversation_id),
+        })
+        return True
+    except Exception as exc:
+        _logger.error("Failed to route handoff message", extra={"session_id": session_id, "error": str(exc)})
+        await websocket.send_json({
+            "type": "error",
+            "code": "KEFU_ROUTE_ERROR",
+            "message": "人工客服消息发送失败",
+        })
+        return True
 
 
 async def _queue_compensation(

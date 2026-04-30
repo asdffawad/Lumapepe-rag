@@ -1217,6 +1217,8 @@ const API_CONFIG = {
         DOCUMENT_REINDEX: (id) => `/api/v1/admin/documents/${id}/reindex`,
         INGEST_INCREMENTAL: '/api/v1/admin/ingest/incremental',
         KEFU_HANDOFF_REQUESTS: '/api/admin/kefu/handoff/requests',
+        KEFU_MESSAGES: (conversationId) => `/api/admin/kefu/conversations/${conversationId}/messages`,
+        WS_KEFU_ADMIN: '/ws/kefu/admin',
         RETRIEVE_DEBUG: '/api/v1/debug/retrieve',
         AUTH_TOKEN: '/api/v1/debug/auth/token',
         CHAT: '/api/v1/chat'
@@ -1490,6 +1492,9 @@ async function loadMonitor() {
 
 // ── Kefu handoff ───────────────────────────────────────────────────
 let selectedKefuConversationId = null;
+let kefuAdminWs = null;
+let kefuAdminWsConversationId = null;
+let kefuAdminWsConnecting = false;
 
 function kefuStatusText(status) {
   if (Number(status) === 1) return '处理中';
@@ -1508,6 +1513,80 @@ function fmtDate(value) {
   if (!value) return '-';
   try { return new Date(value).toLocaleString('zh-CN'); }
   catch { return String(value); }
+}
+
+function closeKefuAdminWs() {
+  if (kefuAdminWs) {
+    kefuAdminWs.close();
+    kefuAdminWs = null;
+  }
+  kefuAdminWsConnecting = false;
+}
+
+async function connectKefuAdminWs(conversationId) {
+  await getAdminToken();
+  if (!_adminToken || !conversationId) return;
+  if (kefuAdminWs && kefuAdminWs.readyState === WebSocket.OPEN && Number(kefuAdminWsConversationId) === Number(conversationId)) return;
+  if (kefuAdminWsConnecting) return;
+
+  closeKefuAdminWs();
+  kefuAdminWsConnecting = true;
+  kefuAdminWsConversationId = conversationId;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const wsUrl = `${protocol}//${window.location.host}${API_CONFIG.ENDPOINTS.WS_KEFU_ADMIN}?conversation_id=${encodeURIComponent(conversationId)}`;
+  kefuAdminWs = new WebSocket(wsUrl, ['bearer', _adminToken]);
+
+  kefuAdminWs.onopen = () => {
+    kefuAdminWsConnecting = false;
+    console.log('[KefuAdminWS] connected', conversationId);
+  };
+  kefuAdminWs.onmessage = (event) => {
+    try { handleKefuAdminEvent(JSON.parse(event.data)); }
+    catch (e) { console.error('[KefuAdminWS] parse error', e); }
+  };
+  kefuAdminWs.onerror = () => {
+    kefuAdminWsConnecting = false;
+    showToast('人工客服 WebSocket 连接异常', 'error');
+  };
+  kefuAdminWs.onclose = () => {
+    kefuAdminWsConnecting = false;
+    kefuAdminWs = null;
+  };
+}
+
+function appendKefuChatMessage(message) {
+  const box = document.getElementById('kefu-chat-messages');
+  if (!box || !message) return;
+  const senderType = Number(message.sender_type);
+  const label = senderType === 1 ? '用户' : senderType === 2 ? '客服' : senderType === 4 ? '系统' : 'AI';
+  const align = senderType === 2 ? 'right' : 'left';
+  const bg = senderType === 2 ? 'var(--violet-light)' : senderType === 1 ? 'var(--white)' : 'var(--paper-2)';
+  box.insertAdjacentHTML('beforeend', `<div style="text-align:${align};margin-bottom:8px">
+    <div style="display:inline-block;max-width:82%;text-align:left;background:${bg};border:1px solid var(--paper-2);border-radius:10px;padding:9px 11px;font-size:12px;line-height:1.5">
+      <div style="color:var(--ink-4);margin-bottom:3px">${label} · ${fmtDate(message.create_time)}</div>
+      <div>${escHtml(message.content || '')}</div>
+    </div>
+  </div>`);
+  box.scrollTop = box.scrollHeight;
+}
+
+function handleKefuAdminEvent(data) {
+  if (data.event === 'message.new' && data.message) {
+    appendKefuChatMessage(data.message);
+    loadKefuRequests();
+    return;
+  }
+  if (data.event === 'conversation.accepted' || data.event === 'conversation.closed' || data.event === 'handoff.status_changed') {
+    if (selectedKefuConversationId && Number(data.conversation_id) === Number(selectedKefuConversationId)) {
+      loadKefuDetail(selectedKefuConversationId);
+    }
+    loadKefuRequests();
+    if (data.event === 'conversation.closed') showToast('该人工客服会话已关闭', 'info');
+    return;
+  }
+  if (data.event === 'error') {
+    showToast(data.message || '人工客服消息处理失败', 'error');
+  }
 }
 
 async function loadKefuRequests() {
@@ -1555,6 +1634,7 @@ async function loadKefuDetail(conversationId) {
     return;
   }
   renderKefuDetail(res.data);
+  connectKefuAdminWs(conversationId);
   loadKefuRequests();
 }
 
@@ -1570,6 +1650,7 @@ function renderKefuDetail(data) {
   const kefuMessages = data.kefu_messages || [];
   const canAccept = Number(c.status) === 0;
   const canClose = Number(c.status) !== 2;
+  const canSend = Number(c.status) === 1;
 
   document.getElementById('kefu-detail').innerHTML = `
     <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:14px">
@@ -1619,12 +1700,23 @@ function renderKefuDetail(data) {
     </div>
     <div style="margin-bottom:14px">
       <div class="section-title" style="margin-bottom:8px">promotion_kefu_message</div>
-      <div style="max-height:170px;overflow:auto;border:1px solid var(--paper-2);border-radius:10px;background:var(--paper)">
-        ${kefuMessages.length ? kefuMessages.map(m => `<div style="padding:10px 12px;border-bottom:1px solid var(--paper-2);font-size:12px;line-height:1.5">
-          <strong>sender_type=${m.sender_type}</strong>
-          <span style="color:var(--ink-4);margin-left:8px">${fmtDate(m.create_time)}</span>
-          <div style="margin-top:4px">${escHtml(m.content || '')}</div>
-        </div>`).join('') : '<div style="padding:16px;color:var(--ink-4);font-size:12px">暂无客服消息</div>'}
+      <div id="kefu-chat-messages" style="height:240px;overflow:auto;border:1px solid var(--paper-2);border-radius:10px;background:var(--paper);padding:10px">
+        ${kefuMessages.length ? kefuMessages.map(m => {
+          const senderType = Number(m.sender_type);
+          const label = senderType === 1 ? '用户' : senderType === 2 ? '客服' : senderType === 4 ? '系统' : 'AI';
+          const align = senderType === 2 ? 'right' : 'left';
+          const bg = senderType === 2 ? 'var(--violet-light)' : senderType === 1 ? 'var(--white)' : 'var(--paper-2)';
+          return `<div style="text-align:${align};margin-bottom:8px">
+            <div style="display:inline-block;max-width:82%;text-align:left;background:${bg};border:1px solid var(--paper-2);border-radius:10px;padding:9px 11px;font-size:12px;line-height:1.5">
+              <div style="color:var(--ink-4);margin-bottom:3px">${label} · ${fmtDate(m.create_time)}</div>
+              <div>${escHtml(m.content || '')}</div>
+            </div>
+          </div>`;
+        }).join('') : '<div style="padding:16px;color:var(--ink-4);font-size:12px">暂无客服消息</div>'}
+      </div>
+      <div style="display:flex;gap:8px;margin-top:10px">
+        <input id="kefu-reply-input" placeholder="${canSend ? '输入回复内容' : '接入后可回复'}" ${canSend ? '' : 'disabled'} onkeydown="if(event.key==='Enter'){sendKefuReply(${c.id})}" style="flex:1;padding:10px 12px;border:1px solid var(--paper-3);border-radius:10px;background:var(--paper)" />
+        <button class="btn btn-violet" onclick="sendKefuReply(${c.id})" ${canSend ? '' : 'disabled'}>发送</button>
       </div>
     </div>
     <div style="margin-bottom:14px">
@@ -1641,6 +1733,10 @@ function renderKefuDetail(data) {
         <input id="kefu-resolution-note" placeholder="resolution_note" style="padding:10px 12px;border:1px solid var(--paper-3);border-radius:10px;background:var(--paper)" />
       </div>
     </div>`;
+  setTimeout(() => {
+    const box = document.getElementById('kefu-chat-messages');
+    if (box) box.scrollTop = box.scrollHeight;
+  }, 0);
 }
 
 async function acceptKefuRequest(conversationId) {
@@ -1648,6 +1744,42 @@ async function acceptKefuRequest(conversationId) {
   const res = await apiPost(`${API_CONFIG.ENDPOINTS.KEFU_HANDOFF_REQUESTS}/${conversationId}/accept`, {});
   showToast(res.ok ? '已接入请求' : '接入失败', res.ok ? 'success' : 'error');
   if (res.ok) await loadKefuDetail(conversationId);
+}
+
+async function sendKefuReply(conversationId) {
+  await getAdminToken();
+  const input = document.getElementById('kefu-reply-input');
+  const content = input?.value.trim();
+  if (!content) return;
+
+  if (kefuAdminWs && kefuAdminWs.readyState === WebSocket.OPEN && Number(kefuAdminWsConversationId) === Number(conversationId)) {
+    kefuAdminWs.send(JSON.stringify({
+      event: 'message.send',
+      conversation_id: Number(conversationId),
+      client_msg_id: (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : String(Date.now()),
+      content,
+    }));
+    appendKefuChatMessage({
+      sender_type: 2,
+      content,
+      create_time: new Date().toISOString(),
+    });
+    input.value = '';
+    return;
+  }
+
+  const res = await apiPost(API_CONFIG.ENDPOINTS.KEFU_MESSAGES(conversationId), {
+    content,
+    content_type: 1,
+  });
+  if (res.ok) {
+    input.value = '';
+    appendKefuChatMessage(res.data.message);
+    connectKefuAdminWs(conversationId);
+    showToast('已发送', 'success');
+  } else {
+    showToast('发送失败: ' + escHtml(res.msg), 'error');
+  }
 }
 
 async function closeKefuRequest(conversationId) {
@@ -2388,6 +2520,8 @@ function toggleDocRow(rowId) {
   const row = document.getElementById(rowId);
   if (row) row.classList.toggle('open');
 }
+
+window.addEventListener('beforeunload', closeKefuAdminWs);
 </script>
 </body>
 </html>
