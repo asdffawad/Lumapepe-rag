@@ -1,9 +1,9 @@
 -- MySQL 初始化脚本
-CREATE DATABASE IF NOT EXISTS rag_customer_service CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
+CREATE DATABASE IF NOT EXISTS lumapepe CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
-USE rag_customer_service;
+USE lumapepe;
 
-CREATE TABLE IF NOT EXISTS sessions (
+CREATE TABLE IF NOT EXISTS ragz_sessions (
     id VARCHAR(36) PRIMARY KEY,
     user_id VARCHAR(64) NOT NULL,
     intent VARCHAR(32),
@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS sessions (
     INDEX idx_created_at (created_at)
 );
 
-CREATE TABLE IF NOT EXISTS messages (
+CREATE TABLE IF NOT EXISTS ragz_messages (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     session_id VARCHAR(36) NOT NULL,
     role ENUM('user','assistant','system') NOT NULL,
@@ -27,13 +27,13 @@ CREATE TABLE IF NOT EXISTS messages (
     tokens INT,
     latency_ms INT,
     created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (session_id) REFERENCES sessions(id) ON DELETE CASCADE,
+    FOREIGN KEY (session_id) REFERENCES ragz_sessions(id) ON DELETE CASCADE,
     INDEX idx_session_id (session_id),
     INDEX idx_role (role),
     INDEX idx_created_at (created_at)
 );
 
-CREATE TABLE IF NOT EXISTS documents (
+CREATE TABLE IF NOT EXISTS ragz_documents (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     doc_type ENUM('product','policy','faq','manual') NOT NULL,
     title VARCHAR(255) NOT NULL,

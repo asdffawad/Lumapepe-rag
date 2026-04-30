@@ -8,11 +8,11 @@ async def cleanup():
     )
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("DELETE FROM documents")
+            await cur.execute("DELETE FROM ragz_documents")
             await conn.commit()
-            await cur.execute("SELECT COUNT(*) FROM documents")
+            await cur.execute("SELECT COUNT(*) FROM ragz_documents")
             cnt = await cur.fetchone()
-            print(f"documents 表已清空，当前记录数: {cnt[0]}")
+            print(f"ragz_documents 表已清空，当前记录数: {cnt[0]}")
     pool.close()
     await pool.wait_closed()
 

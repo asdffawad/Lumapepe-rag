@@ -1,5 +1,5 @@
 """
-messages 表 CRUD 操作（aiomysql 版本）
+ragz_messages 表 CRUD 操作（aiomysql 版本）
 """
 from __future__ import annotations
 
@@ -41,13 +41,13 @@ class MessageRepository:
         async with self.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
-                    """INSERT INTO messages
+                    """INSERT INTO ragz_messages
                     (session_id, role, content, intent, sources, tokens, latency_ms)
                     VALUES (%s, %s, %s, %s, %s, %s, %s)""",
                     (session_id, role, content, intent, json_module.dumps(sources or {}), tokens, latency_ms),
                 )
                 last_id = cur.lastrowid
-                await cur.execute("SELECT * FROM messages WHERE id = %s", (last_id,))
+                await cur.execute("SELECT * FROM ragz_messages WHERE id = %s", (last_id,))
                 row = await cur.fetchone()
                 return self._row_to_record(row)
 
@@ -55,7 +55,7 @@ class MessageRepository:
         async with self.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
-                    "SELECT * FROM messages WHERE session_id = %s ORDER BY created_at DESC LIMIT %s",
+                    "SELECT * FROM ragz_messages WHERE session_id = %s ORDER BY created_at DESC LIMIT %s",
                     (session_id, limit),
                 )
                 rows = await cur.fetchall()
@@ -65,7 +65,7 @@ class MessageRepository:
         async with self.pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    """SELECT content FROM messages
+                    """SELECT content FROM ragz_messages
                     WHERE session_id = %s AND role = 'user'
                     ORDER BY created_at DESC LIMIT %s""",
                     (session_id, limit),
@@ -79,7 +79,7 @@ class MessageRepository:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 # 先获取消息确认归属
                 await cur.execute(
-                    "SELECT * FROM messages WHERE id = %s AND session_id = %s",
+                    "SELECT * FROM ragz_messages WHERE id = %s AND session_id = %s",
                     (message_id, session_id)
                 )
                 row = await cur.fetchone()
@@ -88,7 +88,7 @@ class MessageRepository:
 
                 # 删除消息
                 await cur.execute(
-                    "DELETE FROM messages WHERE id = %s",
+                    "DELETE FROM ragz_messages WHERE id = %s",
                     (message_id,)
                 )
                 return cur.rowcount > 0

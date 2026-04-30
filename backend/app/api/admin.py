@@ -18,7 +18,7 @@
       -H "Authorization: Bearer <admin-token>"
 
 查看文档列表示例：
-    curl http://localhost:8000/api/v1/admin/documents \\
+    curl http://localhost:8000/api/v1/admin/ragz_documents \\
       -H "Authorization: Bearer <admin-token>"
 """
 from __future__ import annotations
@@ -140,7 +140,7 @@ async def list_documents(current_user: AuthUser = Depends(get_admin_user)):
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT id, doc_type, title, chunk_count, status, created_at, indexed_at "
-                "FROM documents WHERE status != 'deleted' ORDER BY created_at DESC LIMIT 100"
+                "FROM ragz_documents WHERE status != 'deleted' ORDER BY created_at DESC LIMIT 100"
             )
             rows = await cur.fetchall()
             columns = [col[0] for col in cur.description]
@@ -178,7 +178,7 @@ async def get_document(
         async with conn.cursor() as cur:
             await cur.execute(
                 "SELECT id, doc_type, title, file_hash, chunk_count, status, created_at, indexed_at "
-                "FROM documents WHERE id = %s",
+                "FROM ragz_documents WHERE id = %s",
                 (doc_id,),
             )
             row = await cur.fetchone()
@@ -198,7 +198,7 @@ async def reindex_document(
     重新索引指定文档：
     1. 从 Qdrant 删除该 doc_id 的所有向量 chunk
     2. 重新分块、向量化、入库
-    3. 更新 MySQL documents 表状态
+    3. 更新 MySQL ragz_documents 表状态
     """
     from app.database.connection import get_db_pool
     from app.utils.chunker import TextChunker
@@ -213,7 +213,7 @@ async def reindex_document(
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT * FROM documents WHERE id = %s",
+                "SELECT * FROM ragz_documents WHERE id = %s",
                 (doc_id,),
             )
             row = await cur.fetchone()
@@ -233,7 +233,7 @@ async def reindex_document(
     # 3. 删除旧向量
     deleted = await qdrant.delete_by_doc_id(doc_id)
 
-    # 4. 重新摄取：从 documents 表中取出 content（存储在 JSON 字段中）
+    # 4. 重新摄取：从 ragz_documents 表中取出 content（存储在 JSON 字段中）
     #    MySQL JSON 字段返回 str，需要解析
     import json as _json
     content_raw_val = doc.get("content_raw")
@@ -268,7 +268,7 @@ async def reindex_document(
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "UPDATE documents SET status = 'done', indexed_at = NOW(), chunk_count = %s WHERE id = %s",
+                "UPDATE ragz_documents SET status = 'done', indexed_at = NOW(), chunk_count = %s WHERE id = %s",
                 (len(chunks), doc_id),
             )
 
@@ -308,7 +308,7 @@ async def create_document(
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, status FROM documents WHERE file_hash = %s AND status != 'deleted'",
+                "SELECT id, status FROM ragz_documents WHERE file_hash = %s AND status != 'deleted'",
                 (file_hash,),
             )
             existing = await cur.fetchone()
@@ -328,7 +328,7 @@ async def create_document(
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "INSERT INTO documents (title, doc_type, file_hash, status, content_raw) "
+                "INSERT INTO ragz_documents (title, doc_type, file_hash, status, content_raw) "
                 "VALUES (%s, %s, %s, 'processing', %s)",
                 (request.title, request.doc_type, file_hash, json.dumps(request.content, ensure_ascii=False)),
             )
@@ -355,7 +355,7 @@ async def create_document(
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "UPDATE documents SET status = 'done', indexed_at = NOW(), chunk_count = %s WHERE id = %s",
+                "UPDATE ragz_documents SET status = 'done', indexed_at = NOW(), chunk_count = %s WHERE id = %s",
                 (len(chunks), doc_db_id),
             )
 
@@ -427,7 +427,7 @@ async def upload_document(
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "SELECT id, status FROM documents WHERE file_hash = %s AND status != 'deleted'",
+                "SELECT id, status FROM ragz_documents WHERE file_hash = %s AND status != 'deleted'",
                 (file_hash,),
             )
             existing = await cur.fetchone()
@@ -450,7 +450,7 @@ async def upload_document(
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "INSERT INTO documents (title, doc_type, file_hash, status, source_path, content_raw) "
+                "INSERT INTO ragz_documents (title, doc_type, file_hash, status, source_path, content_raw) "
                 "VALUES (%s, %s, %s, 'processing', %s, %s)",
                 (parsed.title, doc_type, file_hash, filename, json.dumps({"title": parsed.title, "content": parsed.content, "markets": parsed.markets, "lang": parsed.lang}, ensure_ascii=False)),
             )
@@ -483,7 +483,7 @@ async def upload_document(
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "UPDATE documents SET status = 'done', indexed_at = NOW(), chunk_count = %s WHERE id = %s",
+                    "UPDATE ragz_documents SET status = 'done', indexed_at = NOW(), chunk_count = %s WHERE id = %s",
                     (len(chunks), doc_db_id),
                 )
 
@@ -503,7 +503,7 @@ async def upload_document(
         async with pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "UPDATE documents SET status = 'failed' WHERE id = %s",
+                    "UPDATE ragz_documents SET status = 'failed' WHERE id = %s",
                     (doc_db_id,),
                 )
         raise HTTPException(status_code=500, detail={"code": "INGEST_ERROR", "message": f"向量化入库失败: {e}"})
@@ -532,7 +532,7 @@ async def update_document(
     # 1. 查询原文档
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT * FROM documents WHERE id = %s", (doc_id,))
+            await cur.execute("SELECT * FROM ragz_documents WHERE id = %s", (doc_id,))
             row = await cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": f"文档 {doc_id} 不存在"})
@@ -587,13 +587,13 @@ async def update_document(
             new_hash = hashlib.sha256(json.dumps(new_content, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
             if request.title:
                 await cur.execute(
-                    "UPDATE documents SET title = %s, file_hash = %s, status = 'done', "
+                    "UPDATE ragz_documents SET title = %s, file_hash = %s, status = 'done', "
                     "indexed_at = NOW(), chunk_count = %s, content_raw = %s WHERE id = %s",
                     (request.title, new_hash, len(chunks), json.dumps(new_content, ensure_ascii=False), doc_id),
                 )
             else:
                 await cur.execute(
-                    "UPDATE documents SET file_hash = %s, status = 'done', "
+                    "UPDATE ragz_documents SET file_hash = %s, status = 'done', "
                     "indexed_at = NOW(), chunk_count = %s, content_raw = %s WHERE id = %s",
                     (new_hash, len(chunks), json.dumps(new_content, ensure_ascii=False), doc_id),
                 )
@@ -625,7 +625,7 @@ async def delete_document(
     # 1. 检查文档是否存在
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
-            await cur.execute("SELECT id, title, status FROM documents WHERE id = %s", (doc_id,))
+            await cur.execute("SELECT id, title, status FROM ragz_documents WHERE id = %s", (doc_id,))
             row = await cur.fetchone()
             if not row:
                 raise HTTPException(status_code=404, detail={"code": "NOT_FOUND", "message": f"文档 {doc_id} 不存在"})
@@ -642,7 +642,7 @@ async def delete_document(
     async with pool.acquire() as conn:
         async with conn.cursor() as cur:
             await cur.execute(
-                "UPDATE documents SET status = 'deleted' WHERE id = %s",
+                "UPDATE ragz_documents SET status = 'deleted' WHERE id = %s",
                 (doc_id,),
             )
 
@@ -695,7 +695,7 @@ async def trigger_incremental_ingest(
         "port": int(os.getenv("MYSQL_PORT", "3306")),
         "user": os.getenv("MYSQL_USER", "root"),
         "password": os.getenv("MYSQL_PASSWORD", ""),
-        "database": os.getenv("MYSQL_DATABASE", "rag_customer_service"),
+            "database": os.getenv("MYSQL_DATABASE", "lumapepe"),
     }
     qdrant_config = {
         "host": os.getenv("QDRANT_HOST", "localhost"),

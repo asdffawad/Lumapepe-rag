@@ -9,11 +9,11 @@
 -- 使用说明:
 -- 1. 在执行前备份数据库
 -- 2. 确保有足够的权限修改表结构
--- 3. 执行命令: mysql -u your_user -p rag_customer_service < upgrade_incremental_ingest.sql
+-- 3. 执行命令: mysql -u your_user -p lumapepe < upgrade_incremental_ingest.sql
 -- 4. 验证迁移: DESCRIBE documents;
 -- =====================================================
 
-USE rag_customer_service;
+USE lumapepe;
 
 -- =====================================================
 -- 第一步: 添加 source_path 列

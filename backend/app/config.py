@@ -32,7 +32,7 @@ class DBConfig:
     port: int = 3306
     user: str = "root"
     password: str = ""
-    database: str = "rag_customer_service"
+    database: str = "lumapepe"
     pool_size: int = 10
     max_overflow: int = 20
     pool_recycle: int = 3600
@@ -187,7 +187,7 @@ def get_config() -> AppConfig:
             port=int(os.getenv("MYSQL_PORT", "3306")),
             user=os.getenv("MYSQL_USER", "root"),
             password=os.getenv("MYSQL_PASSWORD", ""),
-            database=os.getenv("MYSQL_DATABASE", "rag_customer_service"),
+            database=os.getenv("MYSQL_DATABASE", "lumapepe"),
             pool_size=int(os.getenv("MYSQL_POOL_SIZE", "10")),
             max_overflow=int(os.getenv("MYSQL_MAX_OVERFLOW", "20")),
             pool_recycle=int(os.getenv("MYSQL_POOL_RECYCLE", "3600")),

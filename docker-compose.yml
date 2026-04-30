@@ -25,14 +25,6 @@ services:
       # Python
       - PYTHONPATH=/app/backend
       - PYTHONUNBUFFERED=1
-      # MySQL
-      - MYSQL_HOST=mysql
-      - MYSQL_PORT=3306
-      - MYSQL_USER=root
-      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD}
-      - MYSQL_DATABASE=rag_customer_service
-      - MYSQL_POOL_SIZE=${MYSQL_POOL_SIZE:-10}
-      - MYSQL_MAX_OVERFLOW=${MYSQL_MAX_OVERFLOW:-20}
       # Redis
       - REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       # Qdrant (优先使用)
@@ -88,12 +80,16 @@ services:
       # 监控
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENABLE_METRICS=${ENABLE_METRICS:-true}
+      # MySQL (本地数据库)
+      - MYSQL_HOST=${MYSQL_HOST:-host.docker.internal}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER:-root}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-lumapepe}
     volumes:
       - ./data:/app/data:ro
       - ./scripts:/app/scripts:ro
     depends_on:
-      mysql:
-        condition: service_healthy
       redis:
         condition: service_healthy
       qdrant:
@@ -135,12 +131,6 @@ services:
     environment:
       - PYTHONPATH=/app/backend
       - PYTHONUNBUFFERED=1
-      # MySQL
-      - MYSQL_HOST=mysql
-      - MYSQL_PORT=3306
-      - MYSQL_USER=root
-      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD}
-      - MYSQL_DATABASE=rag_customer_service
       # Redis
       - REDIS_URL=redis://redis:6379/0
       - REDIS_PASSWORD=${REDIS_PASSWORD}
@@ -154,12 +144,16 @@ services:
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/2
       # 日志
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # MySQL (本地数据库)
+      - MYSQL_HOST=${MYSQL_HOST:-host.docker.internal}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER:-root}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-lumapepe}
     volumes:
       - ./data:/app/data:ro
       - ./scripts:/app/scripts:ro
     depends_on:
-      mysql:
-        condition: service_healthy
       redis:
         condition: service_healthy
     deploy:
@@ -195,6 +189,12 @@ services:
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/2
       - REDBEAT_REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/3
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # MySQL (本地数据库)
+      - MYSQL_HOST=${MYSQL_HOST:-host.docker.internal}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER:-root}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-lumapepe}
     depends_on:
       redis:
         condition: service_healthy
@@ -222,20 +222,18 @@ services:
     environment:
       - PYTHONPATH=/app/backend
       - PYTHONUNBUFFERED=1
-      # MySQL
-      - MYSQL_HOST=mysql
-      - MYSQL_PORT=3306
-      - MYSQL_USER=root
-      - MYSQL_PASSWORD=${MYSQL_ROOT_PASSWORD}
-      - MYSQL_DATABASE=rag_customer_service
       # Redis
       - REDIS_URL=redis://redis:6379/0
       - REDIS_PASSWORD=${REDIS_PASSWORD}
       # 日志
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      # MySQL (本地数据库)
+      - MYSQL_HOST=${MYSQL_HOST:-host.docker.internal}
+      - MYSQL_PORT=${MYSQL_PORT:-3306}
+      - MYSQL_USER=${MYSQL_USER:-root}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-lumapepe}
     depends_on:
-      mysql:
-        condition: service_healthy
       redis:
         condition: service_healthy
     deploy:
@@ -272,45 +270,6 @@ services:
         limits:
           cpus: "0.5"
           memory: 128M
-    networks:
-      - rag-network
-
-  # ============================================================================
-  # MySQL 数据库
-  # ============================================================================
-  mysql:
-    image: mysql:8.0
-    container_name: rag-mysql
-    restart: unless-stopped
-    ports:
-      - "3307:3306"
-    environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD}
-      - MYSQL_DATABASE=rag_customer_service
-      - MYSQL_CHARACTER_SET_SERVER=utf8mb4
-      - MYSQL_COLLATION_SERVER=utf8mb4_unicode_ci
-    command: >
-      --character-set-server=utf8mb4
-      --collation-server=utf8mb4_unicode_ci
-      --max_connections=200
-      --innodb_buffer_pool_size=256M
-      --innodb_log_file_size=64M
-      --slow_query_log=1
-      --long_query_time=2
-    volumes:
-      - mysql_data:/var/lib/mysql
-      - ./scripts/init_mysql.sql:/docker-entrypoint-initdb.d/init.sql:ro
-    healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD}"]
-      interval: 10s
-      timeout: 5s
-      retries: 10
-      start_period: 30s
-    deploy:
-      resources:
-        limits:
-          cpus: "1.0"
-          memory: 512M
     networks:
       - rag-network
 
@@ -378,6 +337,5 @@ networks:
     driver: bridge
 
 volumes:
-  mysql_data:
   redis_data:
   qdrant_data:

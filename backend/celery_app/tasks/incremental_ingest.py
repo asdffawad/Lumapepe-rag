@@ -37,7 +37,7 @@ def daily_incremental_ingest(dry_run: bool = False, delete_missing: bool = True)
         "port": int(os.getenv("MYSQL_PORT", "3306")),
         "user": os.getenv("MYSQL_USER", "root"),
         "password": os.getenv("MYSQL_PASSWORD", ""),
-        "database": os.getenv("MYSQL_DATABASE", "rag_customer_service"),
+        "database": os.getenv("MYSQL_DATABASE", "lumapepe"),
     }
     milvus_config = {
         "host": os.getenv("MILVUS_HOST", "localhost"),

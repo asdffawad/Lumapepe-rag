@@ -1,5 +1,5 @@
 """
-sessions 表 CRUD 操作（aiomysql 版本）
+ragz_sessions 表 CRUD 操作（aiomysql 版本）
 """
 from __future__ import annotations
 
@@ -33,17 +33,17 @@ class SessionRepository:
         async with self.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
-                    "INSERT INTO sessions (id, user_id, status, metadata) VALUES (%s, %s, 'active', %s)",
+                    "INSERT INTO ragz_sessions (id, user_id, status, metadata) VALUES (%s, %s, 'active', %s)",
                     (sid, user_id, json_module.dumps(metadata or {})),
                 )
-                await cur.execute("SELECT * FROM sessions WHERE id = %s", (sid,))
+                await cur.execute("SELECT * FROM ragz_sessions WHERE id = %s", (sid,))
                 row = await cur.fetchone()
                 return self._row_to_record(row)
 
     async def find_by_id(self, session_id: str) -> Optional[SessionRecord]:
         async with self.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
-                await cur.execute("SELECT * FROM sessions WHERE id = %s", (session_id,))
+                await cur.execute("SELECT * FROM ragz_sessions WHERE id = %s", (session_id,))
                 row = await cur.fetchone()
                 return self._row_to_record(row) if row else None
 
@@ -51,21 +51,29 @@ class SessionRepository:
         async with self.pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "UPDATE sessions SET intent = %s WHERE id = %s", (intent, session_id)
+                    "UPDATE ragz_sessions SET intent = %s WHERE id = %s", (intent, session_id)
                 )
 
     async def update_summary(self, session_id: str, summary: str):
         async with self.pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "UPDATE sessions SET summary = %s WHERE id = %s", (summary, session_id)
+                    "UPDATE ragz_sessions SET summary = %s WHERE id = %s", (summary, session_id)
+                )
+
+    async def update_metadata(self, session_id: str, metadata: dict):
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    "UPDATE ragz_sessions SET metadata = %s WHERE id = %s",
+                    (json_module.dumps(metadata, ensure_ascii=False), session_id),
                 )
 
     async def update_status(self, session_id: str, status: str):
         async with self.pool.acquire() as conn:
             async with conn.cursor() as cur:
                 await cur.execute(
-                    "UPDATE sessions SET status = %s WHERE id = %s", (status, session_id)
+                    "UPDATE ragz_sessions SET status = %s WHERE id = %s", (status, session_id)
                 )
 
     def _row_to_record(self, row: dict) -> SessionRecord:

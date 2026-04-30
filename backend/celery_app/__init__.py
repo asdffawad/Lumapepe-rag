@@ -8,7 +8,7 @@ from celery.schedules import crontab
 
 def make_celery():
     celery = Celery(
-        "rag_customer_service",
+        "lumapepe",
         broker=os.getenv("CELERY_BROKER_URL", "redis://localhost:6379/1"),
         backend=os.getenv("CELERY_RESULT_BACKEND", "redis://localhost:6379/2"),
         include=["celery_app.tasks"],

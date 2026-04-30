@@ -342,6 +342,7 @@ async def run_incremental_ingestion(
                         file_hash=file_hash,
                         file_mtime=mtime,
                         dry_run=dry_run,
+                        content_raw=file_item,
                     )
 
                     if action == "previewed":
@@ -439,6 +440,7 @@ async def run_incremental_ingestion(
                         file_hash=file_hash,
                         file_mtime=mtime,
                         dry_run=dry_run,
+                        content_raw={"title": parsed.title, "content": parsed.content, "markets": parsed.markets, "lang": parsed.lang},
                     )
 
                     if action == "previewed":

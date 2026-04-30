@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import uuid
+from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Query
@@ -17,6 +18,7 @@ from app.services.rag_orchestrator import RAGOrchestrator
 from app.services.intent_service import IntentClassifier
 from app.services.session_service import SessionService
 from app.services.llm_generator import StreamChunk
+from app.services.llm_service import LLMBase
 from app.logging_config import get_logger
 from app.middleware.auth import decode_token
 
@@ -44,6 +46,60 @@ async def get_session_service() -> SessionService | None:
         redis = get_redis_client()
         return SessionService(pool, redis)
     except Exception:
+        return None
+
+
+def get_llm_for_summary() -> "LLMBase | None":
+    """从 app.state 获取 LLM 实例，供会话摘要生成使用"""
+    try:
+        from app.main import app as _app
+        orchestrator = getattr(_app.state, "orchestrator", None)
+        if orchestrator:
+            return orchestrator._generator._llm
+    except Exception:
+        pass
+    return None
+
+
+async def generate_summary(history: list[dict]) -> str | None:
+    """
+    调用 LLM 为对话历史生成中文摘要。
+
+    触发时机：每 N 轮对话后生成一次（避免每次请求都调 LLM）。
+
+    返回: 摘要字符串，失败时返回 None（不阻断主流程）。
+    """
+    if len(history) < 2:
+        return None
+
+    llm = get_llm_for_summary()
+    if llm is None:
+        _logger.warning("LLM not available for summary generation")
+        return None
+
+    try:
+        from app.services.llm_service import ChatMessage
+        # 构造摘要 prompt
+        lines = []
+        for msg in history[-10:]:  # 最近 10 轮
+            role = "用户" if msg.get("role") == "user" else "助手"
+            content = msg.get("content", "")[:300]
+            lines.append(f"{role}: {content}")
+        dialogue_text = "\n".join(lines)
+
+        messages = [
+            ChatMessage(
+                role="system",
+                content="你是一个智能客服对话摘要生成器。请根据以下对话内容，用 30-60 字的中文简要概括本次对话的主题和关键信息。不要添加解释，不要使用引号，直接输出摘要。",
+            ),
+            ChatMessage(role="user", content=f"对话内容:\n{dialogue_text}\n\n摘要:"),
+        ]
+        response = await llm.chat(messages, temperature=0.3, max_tokens=100)
+        summary = response.content.strip()
+        _logger.info("Session summary generated", extra={"summary": summary[:50]})
+        return summary
+    except Exception as e:
+        _logger.error(f"Failed to generate summary: {e}")
         return None
 
 
@@ -434,6 +490,44 @@ async def handle_message(
             "content_length": len(accumulated),
             "save_status": "success" if save_success else "partial",
         })
+
+        # 更新会话 metadata（消息统计 + 最近 50 条对话）
+        try:
+            now = datetime.now().isoformat()
+            existing = await session_svc._session_repo.find_by_id(ctx.session_id)
+            existing_meta = existing.metadata if existing else {}
+
+            # 追加本轮对话到 history
+            updated_history = ctx.history[-48:] + [
+                {"role": "user", "content": content},
+                {"role": "assistant", "content": accumulated},
+            ]
+
+            msg_count = existing_meta.get("message_count", 0) + 2
+            meta_updates = {
+                "last_active": now,
+                "message_count": msg_count,
+                "last_intent": intent,
+                "last_citations": list(set(final_citations)),
+                "recent_messages": updated_history,
+            }
+            merged = {**existing_meta, **meta_updates}
+            await session_svc._session_repo.update_metadata(ctx.session_id, merged)
+        except Exception as e:
+            _logger.error(f"Failed to update session metadata: {e}", extra={"session_id": session_id})
+
+        # 摘要生成：每 3 轮对话后触发一次
+        try:
+            cache_key = f"session:summary:counter:{ctx.session_id}"
+            redis_cli = get_redis_client()
+            round_count = await redis_cli.incr(cache_key)
+            if round_count >= 3:
+                summary = await generate_summary(updated_history)
+                if summary:
+                    await session_svc._session_repo.update_summary(ctx.session_id, summary)
+                await redis_cli.set(cache_key, 0)
+        except Exception as e:
+            _logger.error(f"Failed to generate/update summary: {e}", extra={"session_id": session_id})
     
     except PermissionError as e:
         await websocket.send_json({
