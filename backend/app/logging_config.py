@@ -44,6 +44,41 @@ class JSONFormatter(logging.Formatter):
             entry["intent"] = record.intent
         if hasattr(record, "model"):
             entry["model"] = record.model
+        for key in (
+            "db_host",
+            "db_port",
+            "db_name",
+            "db_user",
+            "conversation_id",
+            "conversation_status",
+            "conversation_user_id",
+            "assigned_admin_id",
+            "jwt_sub",
+            "jwt_role",
+            "resolved_admin_id",
+            "message_id",
+            "sender_type",
+            "sender_id",
+            "receiver_type",
+            "receiver_id",
+            "content_type",
+            "content",
+            "content_length",
+            "tenant_id",
+            "client_msg_id",
+            "unread_field",
+            "missing_field",
+            "target_role",
+            "target_count",
+            "sent_count",
+            "stale_count",
+            "user_connection_count",
+            "admin_connection_count",
+            "event",
+            "error",
+        ):
+            if hasattr(record, key):
+                entry[key] = getattr(record, key)
 
         # 添加异常信息
         if record.exc_info:

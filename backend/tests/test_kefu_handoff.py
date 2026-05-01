@@ -381,8 +381,8 @@ def sync_kefu_client(fake_repo):
         return fake_repo
 
     app.dependency_overrides[kefu.get_kefu_repo] = override_repo
-    with TestClient(app) as client:
-        yield client
+    client = TestClient(app)
+    yield client
     app.dependency_overrides.clear()
 
 

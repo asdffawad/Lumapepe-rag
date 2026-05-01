@@ -65,13 +65,14 @@ USER appuser
 # 暴露端口
 EXPOSE 8000
 
-# 启动命令：gunicorn + uvicorn workers
-# - workers: CPU 核心数 * 2 + 1
+# 启动命令：gunicorn + uvicorn worker
+# - workers: 默认 1。当前人工客服 WebSocket MVP 使用进程内连接管理；
+#   多 worker 会导致用户连接与客服发送落在不同进程，后续多实例需升级 Redis Pub/Sub。
 # - threads: 4（每个 worker 4 线程）
 # - timeout: 300s（支持长连接和 RAG 生成）
 # - keep-alive: 5s
 CMD ["sh", "-c", "gunicorn app.main:app \
-    --workers 4 \
+    --workers ${WEB_CONCURRENCY:-1} \
     --threads 4 \
     --bind 0.0.0.0:8000 \
     --worker-class uvicorn.workers.UvicornWorker \

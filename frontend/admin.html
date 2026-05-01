@@ -1495,6 +1495,7 @@ let selectedKefuConversationId = null;
 let kefuAdminWs = null;
 let kefuAdminWsConversationId = null;
 let kefuAdminWsConnecting = false;
+const kefuPendingSends = new Map();
 
 function kefuStatusText(status) {
   if (Number(status) === 1) return '处理中';
@@ -1546,11 +1547,21 @@ async function connectKefuAdminWs(conversationId) {
   };
   kefuAdminWs.onerror = () => {
     kefuAdminWsConnecting = false;
+    for (const [clientMsgId, pending] of kefuPendingSends.entries()) {
+      clearTimeout(pending.timer);
+      kefuPendingSends.delete(clientMsgId);
+      pending.reject(new Error('WebSocket error'));
+    }
     showToast('人工客服 WebSocket 连接异常', 'error');
   };
   kefuAdminWs.onclose = () => {
     kefuAdminWsConnecting = false;
     kefuAdminWs = null;
+    for (const [clientMsgId, pending] of kefuPendingSends.entries()) {
+      clearTimeout(pending.timer);
+      kefuPendingSends.delete(clientMsgId);
+      pending.reject(new Error('WebSocket closed'));
+    }
   };
 }
 
@@ -1571,6 +1582,15 @@ function appendKefuChatMessage(message) {
 }
 
 function handleKefuAdminEvent(data) {
+  if (data.event === 'message.ack') {
+    const pending = kefuPendingSends.get(data.client_msg_id);
+    if (pending) {
+      clearTimeout(pending.timer);
+      kefuPendingSends.delete(data.client_msg_id);
+      pending.resolve(data);
+    }
+    return;
+  }
   if (data.event === 'message.new' && data.message) {
     appendKefuChatMessage(data.message);
     loadKefuRequests();
@@ -1585,6 +1605,11 @@ function handleKefuAdminEvent(data) {
     return;
   }
   if (data.event === 'error') {
+    for (const [clientMsgId, pending] of kefuPendingSends.entries()) {
+      clearTimeout(pending.timer);
+      kefuPendingSends.delete(clientMsgId);
+      pending.reject(new Error(data.message || data.code || 'WebSocket send failed'));
+    }
     showToast(data.message || '人工客服消息处理失败', 'error');
   }
 }
@@ -1747,27 +1772,37 @@ async function acceptKefuRequest(conversationId) {
 }
 
 async function sendKefuReply(conversationId) {
+  console.log('[admin kefu] send clicked');
   await getAdminToken();
   const input = document.getElementById('kefu-reply-input');
   const content = input?.value.trim();
-  if (!content) return;
-
-  if (kefuAdminWs && kefuAdminWs.readyState === WebSocket.OPEN && Number(kefuAdminWsConversationId) === Number(conversationId)) {
-    kefuAdminWs.send(JSON.stringify({
-      event: 'message.send',
-      conversation_id: Number(conversationId),
-      client_msg_id: (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : String(Date.now()),
-      content,
-    }));
-    appendKefuChatMessage({
-      sender_type: 2,
-      content,
-      create_time: new Date().toISOString(),
-    });
-    input.value = '';
+  console.log('[admin kefu] selected conversation_id =', conversationId);
+  console.log('[admin kefu] ws readyState =', kefuAdminWs ? kefuAdminWs.readyState : 'null');
+  if (!content) {
+    console.warn('[admin kefu] send failed: empty content');
+    showToast('请输入回复内容', 'warning');
     return;
   }
 
+  if (kefuAdminWs && kefuAdminWs.readyState === WebSocket.OPEN && Number(kefuAdminWsConversationId) === Number(conversationId)) {
+    try {
+      console.log('[admin kefu] sending via websocket');
+      const ack = await sendKefuReplyByWebSocket(conversationId, content);
+      input.value = '';
+      appendKefuChatMessage({
+        id: ack.message_id,
+        sender_type: 2,
+        content,
+        create_time: new Date().toISOString(),
+      });
+      console.log('[admin kefu] send success message_id =', ack.message_id);
+      return;
+    } catch (e) {
+      console.warn('[admin kefu] websocket send failed, fallback to http:', e.message || e);
+    }
+  }
+
+  console.log('[admin kefu] fallback sending via http');
   const res = await apiPost(API_CONFIG.ENDPOINTS.KEFU_MESSAGES(conversationId), {
     content,
     content_type: 1,
@@ -1776,10 +1811,29 @@ async function sendKefuReply(conversationId) {
     input.value = '';
     appendKefuChatMessage(res.data.message);
     connectKefuAdminWs(conversationId);
+    console.log('[admin kefu] send success message_id =', res.data.message?.id);
     showToast('已发送', 'success');
   } else {
+    console.error('[admin kefu] send failed', res);
     showToast('发送失败: ' + escHtml(res.msg), 'error');
   }
+}
+
+function sendKefuReplyByWebSocket(conversationId, content) {
+  return new Promise((resolve, reject) => {
+    const clientMsgId = (window.crypto && window.crypto.randomUUID) ? window.crypto.randomUUID() : String(Date.now());
+    const timer = setTimeout(() => {
+      kefuPendingSends.delete(clientMsgId);
+      reject(new Error('WebSocket ack timeout'));
+    }, 3000);
+    kefuPendingSends.set(clientMsgId, { resolve, reject, timer });
+    kefuAdminWs.send(JSON.stringify({
+      event: 'message.send',
+      conversation_id: Number(conversationId),
+      client_msg_id: clientMsgId,
+      content,
+    }));
+  });
 }
 
 async function closeKefuRequest(conversationId) {

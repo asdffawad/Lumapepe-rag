@@ -9,6 +9,7 @@ RAG 转人工客服 MVP 接口。
 from __future__ import annotations
 
 import json
+import os
 from datetime import datetime
 from typing import Any
 
@@ -19,9 +20,11 @@ from pydantic import BaseModel, Field
 from app.database.connection import get_db_pool
 from app.middleware.auth import AuthUser, JWTError, get_admin_user, get_current_user, verify_ws_token
 from app.api.kefu_ws_manager import get_kefu_connection_manager
+from app.logging_config import get_logger
 
 
 router = APIRouter(tags=["kefu"])
+_logger = get_logger("kefu")
 
 HANDOFF_AI = 0
 HANDOFF_PENDING = 1
@@ -117,6 +120,15 @@ def _ws_subprotocol(websocket: WebSocket) -> str | None:
     if raw and "," in raw:
         return raw.split(",")[0].strip()
     return raw or None
+
+
+def _db_log_context() -> dict[str, Any]:
+    return {
+        "db_host": os.getenv("MYSQL_HOST") or os.getenv("DB_HOST"),
+        "db_port": os.getenv("MYSQL_PORT") or os.getenv("DB_PORT"),
+        "db_name": os.getenv("MYSQL_DATABASE") or os.getenv("DB_NAME"),
+        "db_user": os.getenv("MYSQL_USER") or os.getenv("DB_USER"),
+    }
 
 
 def _handoff_status_from_conversation(conversation: dict | None) -> int:
@@ -342,6 +354,19 @@ class KefuRepository:
         receiver_type: int | None = None,
         tenant_id: int = 0,
     ) -> dict:
+        _logger.info(
+            "[kefu] inserting promotion_kefu_message ...",
+            extra={
+                **_db_log_context(),
+                "conversation_id": conversation_id,
+                "sender_type": sender_type,
+                "sender_id": sender_id,
+                "receiver_type": receiver_type,
+                "receiver_id": receiver_id,
+                "tenant_id": tenant_id,
+                "content_length": len(content or ""),
+            },
+        )
         async with self.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
@@ -363,11 +388,28 @@ class KefuRepository:
                     ),
                 )
                 message_id = cur.lastrowid
+                try:
+                    await conn.commit()
+                    _logger.info(
+                        "[kefu] commit success",
+                        extra={**_db_log_context(), "conversation_id": conversation_id, "message_id": message_id},
+                    )
+                except Exception as exc:
+                    _logger.warning(
+                        "[kefu] commit skipped or failed",
+                        extra={"conversation_id": conversation_id, "message_id": message_id, "error": str(exc)},
+                    )
                 await cur.execute(
                     "SELECT * FROM promotion_kefu_message WHERE id = %s",
                     (message_id,),
                 )
-                return await cur.fetchone()
+                row = await cur.fetchone()
+                _logger.info(
+                    "[kefu] inserted message_id = %s",
+                    message_id,
+                    extra={**_db_log_context(), "conversation_id": conversation_id, "message_id": message_id},
+                )
+                return row
 
     async def list_handoff_requests(self, limit: int = 50) -> list[dict]:
         async with self.pool.acquire() as conn:
@@ -560,12 +602,40 @@ class KefuRepository:
         content: str,
         content_type: int = CONTENT_TEXT,
     ) -> dict:
+        _logger.info(
+            "[kefu] create admin message validation",
+            extra={
+                **_db_log_context(),
+                "conversation_id": conversation.get("id"),
+                "conversation_status": conversation.get("status"),
+                "conversation_user_id": conversation.get("user_id"),
+                "assigned_admin_id": conversation.get("assigned_admin_id"),
+                "resolved_admin_id": admin_user.get("id"),
+                "content_length": len(content or ""),
+            },
+        )
         if int(conversation.get("status") or 0) == 2:
+            _logger.warning(
+                "[kefu] admin message rejected: conversation closed",
+                extra={"conversation_id": conversation.get("id"), "conversation_status": conversation.get("status")},
+            )
             raise ValueError("CONVERSATION_CLOSED")
         if int(conversation.get("status") or 0) != 1:
+            _logger.warning(
+                "[kefu] admin message rejected: conversation not accepted",
+                extra={"conversation_id": conversation.get("id"), "conversation_status": conversation.get("status")},
+            )
             raise PermissionError("CONVERSATION_NOT_ACCEPTED")
         assigned_admin_id = conversation.get("assigned_admin_id")
         if assigned_admin_id and int(assigned_admin_id) != int(admin_user["id"]):
+            _logger.warning(
+                "[kefu] admin message rejected: admin not assigned",
+                extra={
+                    "conversation_id": conversation.get("id"),
+                    "assigned_admin_id": assigned_admin_id,
+                    "resolved_admin_id": admin_user.get("id"),
+                },
+            )
             raise PermissionError("ADMIN_NOT_ASSIGNED")
 
         message = await self.insert_kefu_message(
@@ -610,14 +680,47 @@ class KefuRepository:
             async with conn.cursor() as cur:
                 try:
                     await cur.execute(sql, tuple(params))
+                    try:
+                        await conn.commit()
+                    except Exception:
+                        pass
+                    _logger.info(
+                        "[kefu] updated promotion_kefu_conversation last message",
+                        extra={
+                            **_db_log_context(),
+                            "conversation_id": conversation_id,
+                            "unread_field": unread_field,
+                            "content_length": len(content or ""),
+                        },
+                    )
                 except Exception as e:
                     if not unread_field or "Unknown column" not in str(e):
+                        _logger.error(
+                            "[kefu] update conversation last message failed",
+                            extra={
+                                **_db_log_context(),
+                                "conversation_id": conversation_id,
+                                "error": str(e),
+                            },
+                        )
                         raise
                     fallback_assignments = assignments[:-1]
                     fallback_params = [_truncate(content), content_type, conversation_id]
                     await cur.execute(
                         f"UPDATE promotion_kefu_conversation SET {', '.join(fallback_assignments)} WHERE id = %s",
                         tuple(fallback_params),
+                    )
+                    try:
+                        await conn.commit()
+                    except Exception:
+                        pass
+                    _logger.info(
+                        "[kefu] updated promotion_kefu_conversation last message without unread field",
+                        extra={
+                            **_db_log_context(),
+                            "conversation_id": conversation_id,
+                            "missing_field": unread_field,
+                        },
                     )
 
     async def accept_conversation(self, conversation_id: int, admin_id: int) -> dict:
@@ -912,8 +1015,40 @@ async def send_admin_kefu_message(
     current_user: AuthUser = Depends(get_admin_user),
     repo: KefuRepository = Depends(get_kefu_repo),
 ):
+    _logger.info(
+        "[kefu] admin send message request received",
+        extra={
+            **_db_log_context(),
+            "conversation_id": conversation_id,
+            "content": request.content,
+            "content_type": request.content_type,
+            "jwt_sub": current_user.user_id,
+            "jwt_role": current_user.role,
+        },
+    )
     conversation = _require_conversation(await repo.get_conversation(conversation_id))
+    _logger.info(
+        "[kefu] conversation found = true",
+        extra={
+            **_db_log_context(),
+            "conversation_id": conversation_id,
+            "conversation_status": conversation.get("status"),
+            "conversation_user_id": conversation.get("user_id"),
+            "assigned_admin_id": conversation.get("assigned_admin_id"),
+            "tenant_id": conversation.get("tenant_id"),
+        },
+    )
     admin_user = await _get_admin_actor(repo, current_user)
+    _logger.info(
+        "[kefu] resolved admin_id = %s",
+        admin_user.get("id"),
+        extra={
+            **_db_log_context(),
+            "conversation_id": conversation_id,
+            "resolved_admin_id": admin_user.get("id"),
+            "jwt_sub": current_user.user_id,
+        },
+    )
     try:
         message = await repo.create_admin_kefu_message(
             conversation,
@@ -922,10 +1057,28 @@ async def send_admin_kefu_message(
             content_type=request.content_type,
         )
     except Exception as exc:
+        _logger.error(
+            "[kefu] admin send message failed before insert or update",
+            extra={**_db_log_context(), "conversation_id": conversation_id, "error": str(exc)},
+        )
         _raise_send_error(exc)
 
     manager = get_kefu_connection_manager()
-    await manager.send_to_user(conversation_id, _message_event(conversation_id, message))
+    _logger.info(
+        "[kefu] websocket push to user start",
+        extra={"conversation_id": conversation_id, "message_id": message.get("id")},
+    )
+    try:
+        await manager.send_to_user(conversation_id, _message_event(conversation_id, message))
+        _logger.info(
+            "[kefu] websocket push to user done",
+            extra={"conversation_id": conversation_id, "message_id": message.get("id")},
+        )
+    except Exception as exc:
+        _logger.error(
+            "[kefu] websocket push to user failed after db insert",
+            extra={"conversation_id": conversation_id, "message_id": message.get("id"), "error": str(exc)},
+        )
     return {"conversation_id": conversation_id, "message": _jsonable(message)}
 
 
@@ -1140,28 +1293,51 @@ async def websocket_kefu_admin(
     try:
         auth_user = await verify_ws_token(dict(websocket.headers))
     except JWTError as exc:
+        _logger.warning("[kefu] admin websocket auth failed", extra={"conversation_id": conversation_id, "error": str(exc)})
         await websocket.close(code=4001, reason=str(exc))
         return
 
     await websocket.accept(subprotocol=subprotocol)
     if auth_user.role != "admin":
+        _logger.warning(
+            "[kefu] admin websocket role denied",
+            extra={"conversation_id": conversation_id, "jwt_sub": auth_user.user_id, "jwt_role": auth_user.role},
+        )
         await websocket.send_json({"event": "error", "code": "ROLE_DENIED", "message": "客服 WebSocket 需要 admin 身份"})
         await websocket.close(code=4003, reason="ROLE_DENIED")
         return
 
     conversation = await repo.get_conversation(conversation_id)
     if not conversation:
+        _logger.warning("[kefu] admin websocket conversation not found", extra={"conversation_id": conversation_id})
         await websocket.send_json({"event": "error", "code": "CONVERSATION_NOT_FOUND", "message": "客服会话不存在"})
         await websocket.close(code=4004, reason="CONVERSATION_NOT_FOUND")
         return
     admin_user = await repo.resolve_admin_user(auth_user.user_id)
     if not admin_user:
+        _logger.warning(
+            "[kefu] admin websocket admin not found",
+            extra={"conversation_id": conversation_id, "jwt_sub": auth_user.user_id, "jwt_role": auth_user.role},
+        )
         await websocket.send_json({"event": "error", "code": "ADMIN_USER_NOT_FOUND", "message": "当前管理员无法匹配 system_users"})
         await websocket.close(code=4003, reason="ADMIN_USER_NOT_FOUND")
         return
 
     manager = get_kefu_connection_manager()
     await manager.connect_admin(websocket, conversation_id)
+    _logger.info(
+        "[kefu] admin websocket connected",
+        extra={
+            **_db_log_context(),
+            "conversation_id": conversation_id,
+            "jwt_sub": auth_user.user_id,
+            "jwt_role": auth_user.role,
+            "resolved_admin_id": admin_user.get("id"),
+            "conversation_status": conversation.get("status"),
+            "conversation_user_id": conversation.get("user_id"),
+            "assigned_admin_id": conversation.get("assigned_admin_id"),
+        },
+    )
     await websocket.send_json({
         "event": "connected",
         "conversation_id": conversation_id,
@@ -1182,18 +1358,45 @@ async def websocket_kefu_admin(
 
             content = str(payload.get("content") or "").strip()
             client_msg_id = payload.get("client_msg_id")
+            _logger.info(
+                "[kefu] admin websocket message.send received",
+                extra={
+                    **_db_log_context(),
+                    "conversation_id": conversation_id,
+                    "client_msg_id": client_msg_id,
+                    "content": content,
+                    "jwt_sub": auth_user.user_id,
+                    "jwt_role": auth_user.role,
+                    "resolved_admin_id": admin_user.get("id"),
+                },
+            )
             if not content:
                 await websocket.send_json({"event": "error", "code": "EMPTY_CONTENT", "message": "消息内容不能为空"})
                 continue
 
             conversation = _require_conversation(await repo.get_conversation(conversation_id))
+            _logger.info(
+                "[kefu] admin websocket conversation found",
+                extra={
+                    "conversation_id": conversation_id,
+                    "conversation_status": conversation.get("status"),
+                    "conversation_user_id": conversation.get("user_id"),
+                    "assigned_admin_id": conversation.get("assigned_admin_id"),
+                    "tenant_id": conversation.get("tenant_id"),
+                },
+            )
             try:
                 message = await repo.create_admin_kefu_message(conversation, admin_user, content)
             except Exception as exc:
                 if isinstance(exc, ValueError) and str(exc) == "CONVERSATION_CLOSED":
+                    _logger.warning("[kefu] admin websocket send rejected: closed", extra={"conversation_id": conversation_id})
                     await websocket.send_json({"event": "error", "code": "CONVERSATION_CLOSED", "message": "客服会话已关闭，不能继续发送消息"})
                     continue
                 if isinstance(exc, PermissionError):
+                    _logger.warning(
+                        "[kefu] admin websocket send rejected: permission",
+                        extra={"conversation_id": conversation_id, "error": str(exc)},
+                    )
                     await websocket.send_json({"event": "error", "code": str(exc) or "KEFU_SEND_DENIED", "message": "当前客服不能发送该会话消息"})
                     continue
                 raise
@@ -1204,7 +1407,21 @@ async def websocket_kefu_admin(
                 "message_id": message["id"],
                 "conversation_id": conversation_id,
             })
-            await manager.send_to_user(conversation_id, _message_event(conversation_id, message))
+            _logger.info(
+                "[kefu] websocket push to user start",
+                extra={"conversation_id": conversation_id, "message_id": message.get("id")},
+            )
+            try:
+                await manager.send_to_user(conversation_id, _message_event(conversation_id, message))
+                _logger.info(
+                    "[kefu] websocket push to user done",
+                    extra={"conversation_id": conversation_id, "message_id": message.get("id")},
+                )
+            except Exception as exc:
+                _logger.error(
+                    "[kefu] websocket push to user failed after db insert",
+                    extra={"conversation_id": conversation_id, "message_id": message.get("id"), "error": str(exc)},
+                )
     except WebSocketDisconnect:
         pass
     finally:

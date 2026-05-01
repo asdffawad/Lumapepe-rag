@@ -1545,6 +1545,7 @@
         kefuWs: null,
         kefuConnecting: false,
         kefuHistoryLoadedFor: null,
+        kefuReconnectTimer: null,
         token: null,
         sessionId: null,
         userId: 'user-' + Math.random().toString(36).substr(2, 8),
@@ -1959,6 +1960,10 @@
     }
 
     function closeKefuUserWebSocket() {
+        if (state.kefuReconnectTimer) {
+            clearTimeout(state.kefuReconnectTimer);
+            state.kefuReconnectTimer = null;
+        }
         if (state.kefuWs) {
             state.kefuWs.close();
             state.kefuWs = null;
@@ -1983,6 +1988,10 @@
 
         state.kefuWs.onopen = () => {
             state.kefuConnecting = false;
+            if (state.kefuReconnectTimer) {
+                clearTimeout(state.kefuReconnectTimer);
+                state.kefuReconnectTimer = null;
+            }
             console.debug('[KefuWS] Connected:', conversationId);
         };
         state.kefuWs.onmessage = (event) => {
@@ -1996,9 +2005,17 @@
             state.kefuConnecting = false;
             showToast('人工客服连接异常', 'error');
         };
-        state.kefuWs.onclose = () => {
+        state.kefuWs.onclose = (event) => {
+            console.debug('[KefuWS] Disconnected:', event.code, event.reason);
             state.kefuConnecting = false;
             state.kefuWs = null;
+            if ((state.chatMode === 'waiting_human' || state.chatMode === 'human') && state.kefuConversationId) {
+                if (state.kefuReconnectTimer) clearTimeout(state.kefuReconnectTimer);
+                state.kefuReconnectTimer = setTimeout(() => {
+                    state.kefuReconnectTimer = null;
+                    connectKefuUserWebSocket(state.kefuConversationId);
+                }, 1200);
+            }
         };
     }
 
@@ -2015,8 +2032,6 @@
                 addMessage('user', escapeHtml(message.content || ''));
             } else if (Number(message.sender_type) === 2) {
                 addMessage('assistant', escapeHtml('人工客服：' + (message.content || '')));
-            } else if (Number(message.sender_type) === 4) {
-                addMessage('assistant', escapeHtml('系统：' + (message.content || '')));
             }
         });
     }
@@ -2044,8 +2059,6 @@
             const m = data.message;
             if (Number(m.sender_type) === 2) {
                 addMessage('assistant', escapeHtml('人工客服：' + (m.content || '')));
-            } else if (Number(m.sender_type) === 4) {
-                addMessage('assistant', escapeHtml('系统：' + (m.content || '')));
             }
             return;
         }
