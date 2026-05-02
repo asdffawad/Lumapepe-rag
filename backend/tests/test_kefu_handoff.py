@@ -692,6 +692,26 @@ async def test_kefu_connection_manager_broadcasts_by_conversation():
     assert admin_ws.sent == [{"event": "message.new", "conversation_id": 100}]
 
 
+def test_kefu_message_event_is_json_serializable_with_bit_fields():
+    import json
+
+    from app.api.kefu import _message_event
+
+    event = _message_event(100, {
+        "id": 1,
+        "conversation_id": 100,
+        "sender_type": 2,
+        "content": "hello",
+        "read_status": b"\x00",
+        "deleted": b"\x01",
+        "create_time": datetime(2026, 5, 2, 0, 0, 0),
+    })
+
+    json.dumps(event)
+    assert event["message"]["read_status"] == 0
+    assert event["message"]["deleted"] == 1
+
+
 def test_kefu_websocket_user_message_reaches_admin(sync_kefu_client):
     user_token = create_token("288", role="user")
     admin_token = create_token("1", role="admin")

@@ -2031,7 +2031,7 @@
             if (Number(message.sender_type) === 1) {
                 addMessage('user', escapeHtml(message.content || ''));
             } else if (Number(message.sender_type) === 2) {
-                addMessage('assistant', escapeHtml('人工客服：' + (message.content || '')));
+                addMessage('assistant', escapeHtml(message.content || ''));
             }
         });
     }
@@ -2058,7 +2058,7 @@
         if (data.event === 'message.new' && data.message) {
             const m = data.message;
             if (Number(m.sender_type) === 2) {
-                addMessage('assistant', escapeHtml('人工客服：' + (m.content || '')));
+                addMessage('assistant', escapeHtml(m.content || ''));
             }
             return;
         }

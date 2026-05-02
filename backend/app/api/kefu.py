@@ -89,6 +89,14 @@ def _truncate(text: str | None, limit: int = 2048) -> str:
 def _jsonable(value: Any) -> Any:
     if isinstance(value, datetime):
         return value.strftime("%Y-%m-%d %H:%M:%S")
+    if isinstance(value, (bytes, bytearray)):
+        raw = bytes(value)
+        if len(raw) == 1:
+            return int.from_bytes(raw, "big")
+        try:
+            return raw.decode("utf-8")
+        except UnicodeDecodeError:
+            return raw.hex()
     if isinstance(value, dict):
         return {key: _jsonable(val) for key, val in value.items()}
     if isinstance(value, list):

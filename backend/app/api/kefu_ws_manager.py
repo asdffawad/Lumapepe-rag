@@ -80,7 +80,16 @@ class KefuConnectionManager:
             try:
                 await websocket.send_json(payload)
                 sent += 1
-            except Exception:
+            except Exception as exc:
+                _logger.warning(
+                    "[kefu] websocket room send failed",
+                    extra={
+                        "conversation_id": conversation_id,
+                        "target_role": role,
+                        "event": event,
+                        "error": str(exc),
+                    },
+                )
                 stale.append(websocket)
         for websocket in stale:
             self.disconnect(websocket)

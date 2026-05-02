@@ -1568,17 +1568,36 @@ async function connectKefuAdminWs(conversationId) {
 function appendKefuChatMessage(message) {
   const box = document.getElementById('kefu-chat-messages');
   if (!box || !message) return;
+  const key = getKefuMessageKey(message);
+  if (key && Array.from(box.querySelectorAll('[data-kefu-message-key]')).some(el => el.dataset.kefuMessageKey === key)) {
+    return;
+  }
   const senderType = Number(message.sender_type);
   const label = senderType === 1 ? '用户' : senderType === 2 ? '客服' : senderType === 4 ? '系统' : 'AI';
   const align = senderType === 2 ? 'right' : 'left';
   const bg = senderType === 2 ? 'var(--violet-light)' : senderType === 1 ? 'var(--white)' : 'var(--paper-2)';
-  box.insertAdjacentHTML('beforeend', `<div style="text-align:${align};margin-bottom:8px">
+  box.insertAdjacentHTML('beforeend', `<div data-kefu-message-key="${escHtml(key)}" style="text-align:${align};margin-bottom:8px">
     <div style="display:inline-block;max-width:82%;text-align:left;background:${bg};border:1px solid var(--paper-2);border-radius:10px;padding:9px 11px;font-size:12px;line-height:1.5">
       <div style="color:var(--ink-4);margin-bottom:3px">${label} · ${fmtDate(message.create_time)}</div>
       <div>${escHtml(message.content || '')}</div>
     </div>
   </div>`);
   box.scrollTop = box.scrollHeight;
+}
+
+function getKefuMessageKey(message) {
+  if (!message) return '';
+  if (message.id !== undefined && message.id !== null && String(message.id) !== '') {
+    return `id:${message.id}`;
+  }
+  return [
+    'fallback',
+    message.conversation_id || '',
+    message.sender_type || '',
+    message.sender_id || '',
+    message.create_time || '',
+    message.content || '',
+  ].join(':');
 }
 
 function handleKefuAdminEvent(data) {
@@ -1731,7 +1750,7 @@ function renderKefuDetail(data) {
           const label = senderType === 1 ? '用户' : senderType === 2 ? '客服' : senderType === 4 ? '系统' : 'AI';
           const align = senderType === 2 ? 'right' : 'left';
           const bg = senderType === 2 ? 'var(--violet-light)' : senderType === 1 ? 'var(--white)' : 'var(--paper-2)';
-          return `<div style="text-align:${align};margin-bottom:8px">
+          return `<div data-kefu-message-key="${escHtml(getKefuMessageKey(m))}" style="text-align:${align};margin-bottom:8px">
             <div style="display:inline-block;max-width:82%;text-align:left;background:${bg};border:1px solid var(--paper-2);border-radius:10px;padding:9px 11px;font-size:12px;line-height:1.5">
               <div style="color:var(--ink-4);margin-bottom:3px">${label} · ${fmtDate(m.create_time)}</div>
               <div>${escHtml(m.content || '')}</div>

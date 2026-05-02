@@ -1,0 +1,101 @@
+- generic [active] [ref=e1]:
+  - navigation [ref=e2]:
+    - generic [ref=e3]:
+      - img [ref=e4]
+      - text: RAG 智能客服
+    - generic [ref=e7]:
+      - button "网络日志 4" [ref=e8] [cursor=pointer]:
+        - img [ref=e9]
+        - text: 网络日志
+        - generic [ref=e11]: "4"
+      - generic [ref=e12]:
+        - generic [ref=e13]: 🔒
+        - generic [ref=e14]: 已认证
+      - generic [ref=e17]: 已连接
+  - main [ref=e18]:
+    - complementary [ref=e19]:
+      - generic [ref=e20]:
+        - generic [ref=e21]: 连接状态
+        - generic [ref=e22]:
+          - generic [ref=e23]:
+            - generic [ref=e24]: "0"
+            - generic [ref=e25]: 发送 Ping
+          - generic [ref=e26]:
+            - generic [ref=e27]: "0"
+            - generic [ref=e28]: 收到 Pong
+          - generic [ref=e29]:
+            - generic [ref=e30]: "0"
+            - generic [ref=e31]: 已发送
+          - generic [ref=e32]:
+            - generic [ref=e33]: "1"
+            - generic [ref=e34]: 已接收
+        - generic [ref=e35]: "最后活动: 17:23:23"
+    - generic [ref=e36]:
+      - generic [ref=e37]:
+        - generic [ref=e38]: 🤖
+        - generic [ref=e39]:
+          - heading "智能助手" [level=2] [ref=e40]
+          - paragraph [ref=e41]: 基于 RAG 的电商问答系统
+        - generic [ref=e42]:
+          - generic [ref=e43]:
+            - generic [ref=e44]: "-"
+            - generic [ref=e45]: 会话 ID
+          - generic [ref=e46]:
+            - generic [ref=e47]: 0s
+            - generic [ref=e48]: 在线时长
+      - generic [ref=e50]:
+        - generic [ref=e51]: 您好！我是 RAG 智能客服助手，有什么可以帮您的吗？
+        - generic [ref=e52]:
+          - generic [ref=e53]: 在线
+          - generic [ref=e54]: •
+          - generic [ref=e55]: v2.0
+      - generic [ref=e56]:
+        - generic [ref=e57]:
+          - button "快捷录音" [ref=e58] [cursor=pointer]:
+            - img [ref=e59]
+          - textbox "输入您的问题，按 Enter 发送..." [ref=e63]
+          - button [ref=e64] [cursor=pointer]:
+            - img [ref=e65]
+        - generic [ref=e68] [cursor=pointer]:
+          - img [ref=e69]
+          - text: 语音模式
+        - generic [ref=e72]:
+          - button "转人工客服" [ref=e73] [cursor=pointer]:
+            - img [ref=e74]
+            - text: 转人工客服
+          - generic [ref=e76]: AI 客服处理中
+        - generic [ref=e77]:
+          - generic [ref=e78] [cursor=pointer]: 🛒 查询订单
+          - generic [ref=e79] [cursor=pointer]: 👜 促销
+          - generic [ref=e80] [cursor=pointer]: ↩ 退换货
+          - generic [ref=e81] [cursor=pointer]: 💰 优惠
+  - generic [ref=e83]:
+    - generic [ref=e84]:
+      - heading "网络请求日志" [level=3] [ref=e85]:
+        - img [ref=e86]
+        - text: 网络请求日志
+      - generic [ref=e88]:
+        - button "清空" [ref=e89] [cursor=pointer]
+        - button "收起" [ref=e90] [cursor=pointer]
+    - generic [ref=e91]:
+      - generic [ref=e92]:
+        - generic [ref=e93] [cursor=pointer]:
+          - generic [ref=e94]: WS
+          - generic [ref=e95]: /ws/chat
+          - generic [ref=e96]: "200"
+        - generic [ref=e97] [cursor=pointer]:
+          - generic [ref=e98]: WS
+          - generic [ref=e99]: ws://localhost/ws/chat
+          - generic [ref=e100]: "200"
+        - generic [ref=e101] [cursor=pointer]:
+          - generic [ref=e102]: WS
+          - generic [ref=e103]: ws://localhost/ws/chat
+          - generic [ref=e104]: ...
+        - generic [ref=e105] [cursor=pointer]:
+          - generic [ref=e106]: POST
+          - generic [ref=e107]: /api/v1/debug/auth/token
+          - generic [ref=e108]: "200"
+          - generic [ref=e109]: 25ms
+      - generic [ref=e110]:
+        - heading "请求详情" [level=4] [ref=e111]
+        - paragraph [ref=e112]: 点击左侧请求查看详情
