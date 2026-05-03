@@ -11,6 +11,7 @@ from fastapi import APIRouter, Response
 import time
 
 router = APIRouter(prefix="/api/v1", tags=["health"])
+public_router = APIRouter(prefix="/api", tags=["health"])
 
 
 async def _check_mysql() -> dict:
@@ -152,3 +153,47 @@ async def health_alerts():
             },
         },
     }
+
+
+async def _redis_health_payload() -> dict:
+    from app.config import get_config
+    from app.services.redis_pubsub import get_redis_pubsub_manager, mask_redis_url
+
+    config = get_config()
+    manager = get_redis_pubsub_manager(config.redis.url, redis_required=config.redis.required)
+    redis_url = mask_redis_url(config.redis.url)
+    try:
+        redis_client = getattr(manager, "_redis", None)
+        if redis_client is None:
+            from app.cache.redis_client import get_redis_client
+            redis_client = get_redis_client()
+        ping = await redis_client.ping()
+        return {
+            "ok": bool(ping),
+            "redis_url": redis_url,
+            "ping": "PONG" if ping else None,
+            "pubsub_connected": manager.connected,
+            "subscriber_running": manager.subscriber_running,
+            "channel": manager.channel,
+            "instance_id": manager.instance_id,
+        }
+    except Exception as exc:
+        return {
+            "ok": False,
+            "redis_url": redis_url,
+            "error": str(exc),
+            "pubsub_connected": manager.connected,
+            "subscriber_running": manager.subscriber_running,
+            "channel": manager.channel,
+            "instance_id": manager.instance_id,
+        }
+
+
+@router.get("/health/redis")
+async def redis_health_v1():
+    return await _redis_health_payload()
+
+
+@public_router.get("/health/redis")
+async def redis_health():
+    return await _redis_health_payload()

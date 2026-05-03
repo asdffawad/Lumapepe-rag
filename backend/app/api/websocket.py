@@ -574,7 +574,7 @@ async def _route_to_kefu_if_handoff(
     }
     try:
         from app.api.kefu import KefuRepository, _message_event
-        from app.api.kefu_ws_manager import get_kefu_connection_manager
+        from app.services.redis_pubsub import publish_kefu_event
 
         repo = KefuRepository(get_db_pool())
         fresh_session = await repo.get_session(session_id)
@@ -623,10 +623,7 @@ async def _route_to_kefu_if_handoff(
             "message_id": message.get("id"),
             "message": "已发送给人工客服" if handoff_status == HANDOFF_ACCEPTED else "已进入人工客服队列，请等待接入",
         })
-        await get_kefu_connection_manager().send_to_admin(
-            int(conversation_id),
-            _message_event(int(conversation_id), message),
-        )
+        await publish_kefu_event(_message_event(int(conversation_id), message, target="admin"))
         await websocket.send_json({
             "type": "done",
             "session_id": session_id,

@@ -10,6 +10,11 @@ from typing import Optional
 
 import aiomysql
 
+from app.logging_config import get_logger
+
+
+_logger = get_logger("database.message")
+
 
 @dataclass
 class MessageRecord:
@@ -106,19 +111,64 @@ class MessageRepository:
                         (session_id, role, content, intent, json_module.dumps(sources or {}, ensure_ascii=False), tokens, latency_ms),
                     )
                 last_id = cur.lastrowid
+                await self._update_session_list_fields(cur, session_id, role, content)
                 await cur.execute("SELECT * FROM ragz_messages WHERE id = %s", (last_id,))
                 row = await cur.fetchone()
                 return self._row_to_record(row)
+
+    async def _update_session_list_fields(self, cur, session_id: str, role: str, content: str):
+        clipped = (content or "")[:500]
+        try:
+            await cur.execute(
+                """
+                UPDATE ragz_sessions
+                SET
+                    last_message_content = %s,
+                    last_message_role = %s,
+                    last_message_at = NOW(),
+                    message_count = COALESCE(message_count, 0) + 1,
+                    updated_at = NOW()
+                WHERE id = %s
+                """,
+                (clipped, role, session_id),
+            )
+        except Exception as e:
+            if "Unknown column" not in str(e):
+                _logger.warning(
+                    "Failed to update ragz_sessions history fields",
+                    extra={"session_id": session_id, "role": role, "error": str(e)},
+                )
+                return
+            try:
+                await cur.execute(
+                    "UPDATE ragz_sessions SET updated_at = NOW() WHERE id = %s",
+                    (session_id,),
+                )
+            except Exception as fallback_error:
+                _logger.warning(
+                    "Failed to touch ragz_sessions updated_at after message write",
+                    extra={"session_id": session_id, "role": role, "error": str(fallback_error)},
+                )
 
     async def list_by_session(self, session_id: str, limit: int = 50) -> list[MessageRecord]:
         async with self.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
-                    "SELECT * FROM ragz_messages WHERE session_id = %s ORDER BY created_at DESC LIMIT %s",
+                    """
+                    SELECT *
+                    FROM (
+                        SELECT *
+                        FROM ragz_messages
+                        WHERE session_id = %s
+                        ORDER BY created_at DESC, id DESC
+                        LIMIT %s
+                    ) recent
+                    ORDER BY recent.created_at ASC, recent.id ASC
+                    """,
                     (session_id, limit),
                 )
                 rows = await cur.fetchall()
-                return [self._row_to_record(r) for r in reversed(rows)]
+                return [self._row_to_record(r) for r in rows]
 
     async def get_recent_queries(self, session_id: str, limit: int = 5) -> list[str]:
         async with self.pool.acquire() as conn:

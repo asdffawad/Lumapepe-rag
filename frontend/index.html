@@ -212,6 +212,116 @@
             text-align: center;
         }
 
+        .session-history-card {
+            padding: 0;
+            overflow: hidden;
+        }
+
+        .session-history-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+            padding: 16px 18px 12px;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .session-history-header .sidebar-title {
+            margin-bottom: 0;
+        }
+
+        .history-refresh-btn {
+            border: 1px solid var(--border);
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            border-radius: 8px;
+            padding: 5px 10px;
+            font-size: 12px;
+            cursor: pointer;
+        }
+
+        .history-refresh-btn:hover {
+            background: var(--bg-hover);
+            color: var(--text-primary);
+        }
+
+        .session-history-list {
+            max-height: 360px;
+            overflow-y: auto;
+            padding: 10px;
+        }
+
+        .session-history-empty {
+            color: var(--text-muted);
+            font-size: 13px;
+            line-height: 1.5;
+            padding: 12px 8px;
+            text-align: center;
+        }
+
+        .session-history-item {
+            width: 100%;
+            display: block;
+            text-align: left;
+            border: 1px solid transparent;
+            background: var(--bg-card);
+            color: var(--text-secondary);
+            border-radius: 10px;
+            padding: 10px;
+            margin-bottom: 8px;
+            cursor: pointer;
+        }
+
+        .session-history-item:hover {
+            border-color: var(--border);
+            background: var(--bg-hover);
+        }
+
+        .session-history-item.active {
+            border-color: var(--accent);
+            background: rgba(99, 102, 241, 0.14);
+            color: var(--text-primary);
+        }
+
+        .history-item-top {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+            margin-bottom: 6px;
+        }
+
+        .history-session-id {
+            color: var(--text-primary);
+            font-size: 13px;
+            font-weight: 600;
+        }
+
+        .history-status {
+            flex-shrink: 0;
+            color: var(--accent-light);
+            font-size: 11px;
+        }
+
+        .history-summary,
+        .history-last-message {
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-size: 12px;
+            line-height: 1.5;
+        }
+
+        .history-last-message {
+            color: var(--text-muted);
+        }
+
+        .history-time {
+            color: var(--text-muted);
+            font-size: 11px;
+            margin-top: 6px;
+        }
+
         /* 聊天区域 */
         .chat-container {
             flex: 1;
@@ -1001,6 +1111,18 @@
                     最后活动: -
                 </div>
             </div>
+            <div class="sidebar-card session-history-card">
+                <div class="session-history-header">
+                    <div class="sidebar-title">&#21382;&#21490;&#20250;&#35805;</div>
+                    <div style="display:flex;gap:6px">
+                        <button class="history-refresh-btn" id="newSessionBtn" onclick="startNewSession()">&#26032;&#24314;</button>
+                        <button class="history-refresh-btn" id="historyRefreshBtn" onclick="loadSessionHistory()">&#21047;&#26032;</button>
+                    </div>
+                </div>
+                <div class="session-history-list" id="sessionHistoryList">
+                    <div class="session-history-empty">&#35748;&#35777;&#21518;&#21152;&#36733;&#21382;&#21490;&#20250;&#35805;</div>
+                </div>
+            </div>
         </aside>
 
         <!-- 聊天区 -->
@@ -1207,6 +1329,8 @@
             HANDOFF_REQUEST: '/api/kefu/handoff/request',
             HANDOFF_STATUS: '/api/kefu/handoff/status',
             KEFU_MESSAGES: (conversationId) => `/api/kefu/conversations/${conversationId}/messages`,
+            SESSION_HISTORY: '/api/sessions/history',
+            SESSION_MESSAGES: (sessionId) => `/api/sessions/${encodeURIComponent(sessionId)}/messages`,
 
             // 健康检查
             HEALTH: '/api/v1/health'
@@ -1517,6 +1641,9 @@
         lastActivity: document.getElementById('lastActivity'),
         sessionCount: document.getElementById('sessionCount'),
         uptime: document.getElementById('uptime'),
+        newSessionBtn: document.getElementById('newSessionBtn'),
+        historyRefreshBtn: document.getElementById('historyRefreshBtn'),
+        sessionHistoryList: document.getElementById('sessionHistoryList'),
         debugPanel: document.getElementById('debugPanel'),
         debugToggle: document.getElementById('debugToggle'),
         debugList: document.getElementById('debugList'),
@@ -1538,6 +1665,13 @@
         voiceCancelPreviewBtn: document.getElementById('voiceCancelPreviewBtn'),
         voiceConfirmPreviewBtn: document.getElementById('voiceConfirmPreviewBtn'),
     };
+    const historyTitleEl = document.querySelector('.session-history-header .sidebar-title');
+    if (historyTitleEl) historyTitleEl.textContent = '历史会话';
+    if (dom.newSessionBtn) dom.newSessionBtn.textContent = '新建';
+    if (dom.historyRefreshBtn) dom.historyRefreshBtn.textContent = '刷新';
+    if (dom.sessionHistoryList) {
+        dom.sessionHistoryList.innerHTML = '<div class="session-history-empty">认证后加载历史会话</div>';
+    }
 
     // ==================== 状态 ====================
     const state = {
@@ -1553,6 +1687,7 @@
         handoffStatus: 0,
         kefuConversationId: null,
         handoffLoading: false,
+        sessionHistoryLoading: false,
         status: 'disconnected',
         retryCount: 0,
         pingCount: 0,
@@ -1779,6 +1914,7 @@
         state.sessionId = data.session_id;
         dom.sessionCount.textContent = state.sessionId?.substr(0, 8) || '-';
         refreshHandoffStatus(true);
+        loadSessionHistory(true);
         state.currentPlaceholder = null;
         state.accumulatedResponse = '';
         dom.sendBtn.disabled = false;
@@ -1876,6 +2012,174 @@
         return div.innerHTML;
     }
 
+    function escapeAttr(text) {
+        return escapeHtml(String(text || '')).replace(/'/g, '&#39;');
+    }
+
+    function formatHistoryTime(value) {
+        if (!value) return '-';
+        const date = new Date(String(value).replace(' ', 'T'));
+        if (Number.isNaN(date.getTime())) return String(value);
+        return date.toLocaleString();
+    }
+
+    function handoffShortText(status) {
+        switch (Number(status || 0)) {
+            case 1: return '待人工';
+            case 2: return '人工中';
+            case 3: return '已关闭';
+            default: return 'AI';
+        }
+    }
+
+    function roleShortText(role) {
+        switch (role) {
+            case 'user': return '我';
+            case 'assistant': return 'AI';
+            case 'agent': return '客服';
+            default: return role || '';
+        }
+    }
+
+    function renderSessionHistory(items) {
+        if (!dom.sessionHistoryList) return;
+        if (!items || items.length === 0) {
+            dom.sessionHistoryList.innerHTML = '<div class="session-history-empty">暂无历史会话</div>';
+            return;
+        }
+        dom.sessionHistoryList.innerHTML = items.map(item => {
+            const activeClass = item.id === state.sessionId ? ' active' : '';
+            const title = escapeHtml(item.title || item.summary || item.last_message || (item.id || '').slice(0, 8) || '-');
+            const summary = escapeHtml(item.summary || '暂无摘要');
+            const lastMessage = escapeHtml(item.last_message || '暂无消息');
+            const statusText = escapeHtml(handoffShortText(item.handoff_status));
+            const updatedAt = escapeHtml(formatHistoryTime(item.last_message_at || item.updated_at || item.created_at));
+            const messageCount = Number(item.message_count || 0);
+            const roleText = roleShortText(item.last_message_role);
+            return `
+                <button class="session-history-item${activeClass}" data-session-id="${escapeAttr(item.id)}" onclick="selectHistorySession('${escapeAttr(item.id)}')">
+                    <div class="history-item-top">
+                        <span class="history-session-id">${title}</span>
+                        <span class="history-status">${statusText} · ${messageCount}</span>
+                    </div>
+                    <div class="history-summary">${summary}</div>
+                    <div class="history-last-message">${roleText ? escapeHtml(roleText) + ': ' : ''}${lastMessage}</div>
+                    <div class="history-time">${updatedAt}</div>
+                </button>
+            `;
+        }).join('');
+    }
+
+    function setActiveHistorySession(sessionId) {
+        if (!dom.sessionHistoryList) return;
+        dom.sessionHistoryList.querySelectorAll('.session-history-item').forEach(item => {
+            item.classList.toggle('active', item.dataset.sessionId === sessionId);
+        });
+    }
+
+    async function loadSessionHistory(silent = false) {
+        if (!state.token || state.sessionHistoryLoading) return;
+        state.sessionHistoryLoading = true;
+        if (dom.historyRefreshBtn) dom.historyRefreshBtn.disabled = true;
+        if (dom.sessionHistoryList && !silent) {
+            dom.sessionHistoryList.innerHTML = '<div class="session-history-empty">正在加载历史会话...</div>';
+        }
+        const url = `${API_CONFIG.ENDPOINTS.SESSION_HISTORY}?user_id=${encodeURIComponent(state.userId)}`;
+        const res = await apiFetch(url, {
+            method: 'GET',
+            headers: { 'Authorization': 'Bearer ' + state.token },
+        });
+        state.sessionHistoryLoading = false;
+        if (dom.historyRefreshBtn) dom.historyRefreshBtn.disabled = false;
+
+        if (res.ok) {
+            renderSessionHistory(res.data.items || []);
+            return res.data.items || [];
+        }
+        if (!silent) {
+            dom.sessionHistoryList.innerHTML = '<div class="session-history-empty">历史会话加载失败</div>';
+            showToast(res.data?.detail?.message || res.error || '历史会话加载失败', 'error');
+        }
+        return [];
+    }
+
+    function rememberSessionInUrl(sessionId) {
+        if (!sessionId) return;
+        const params = new URLSearchParams(window.location.search);
+        params.set('session_id', sessionId);
+        const query = params.toString();
+        window.history.replaceState(null, '', `${window.location.pathname}${query ? '?' + query : ''}${window.location.hash}`);
+    }
+
+    function forgetSessionInUrl() {
+        const params = new URLSearchParams(window.location.search);
+        params.delete('session_id');
+        const query = params.toString();
+        window.history.replaceState(null, '', `${window.location.pathname}${query ? '?' + query : ''}${window.location.hash}`);
+    }
+
+    function clearChatMessages() {
+        dom.chatMessages.innerHTML = '';
+        state.currentPlaceholder = null;
+        state.accumulatedResponse = '';
+    }
+
+    function renderHistoryMessages(messages) {
+        clearChatMessages();
+        if (!messages || messages.length === 0) {
+            addMessage('assistant', '该历史会话暂无消息');
+            return;
+        }
+        messages.forEach(message => {
+            if (message.role === 'user') {
+                addMessage('user', escapeHtml(message.content || ''));
+            } else if (message.role === 'assistant') {
+                addMessage('assistant', escapeHtml(message.content || ''));
+            }
+        });
+    }
+
+    async function selectHistorySession(sessionId, options = {}) {
+        if (!state.token || !sessionId) return;
+        const res = await apiFetch(API_CONFIG.ENDPOINTS.SESSION_MESSAGES(sessionId), {
+            method: 'GET',
+            headers: { 'Authorization': 'Bearer ' + state.token },
+        });
+        if (!res.ok) {
+            showToast(res.data?.detail?.message || res.error || '历史消息加载失败', 'error');
+            return;
+        }
+
+        const session = res.data.session || {};
+        state.sessionId = session.id || sessionId;
+        state.kefuHistoryLoadedFor = null;
+        dom.sessionCount.textContent = state.sessionId?.substr(0, 8) || '-';
+        renderHistoryMessages(res.data.messages || []);
+        updateHandoffUi({
+            handoff_status: session.handoff_status || 0,
+            kefu_conversation_id: session.kefu_conversation_id || null,
+        });
+        setActiveHistorySession(state.sessionId);
+        if (!options.skipUrlUpdate) rememberSessionInUrl(state.sessionId);
+        showToast('已恢复历史会话', 'success');
+    }
+
+    function startNewSession() {
+        state.sessionId = null;
+        state.kefuConversationId = null;
+        state.kefuHistoryLoadedFor = null;
+        state.handoffStatus = 0;
+        state.chatMode = 'ai';
+        closeKefuUserWebSocket();
+        clearChatMessages();
+        addMessage('assistant', '您好！我是 RAG 智能客服助手，有什么可以帮您的吗？');
+        dom.sessionCount.textContent = '-';
+        updateHandoffUi({ handoff_status: 0, kefu_conversation_id: null });
+        setActiveHistorySession(null);
+        forgetSessionInUrl();
+        showToast('已新建会话，发送第一条消息后会保存到历史列表', 'info');
+    }
+
     function handoffText(status) {
         switch (Number(status || 0)) {
             case 1: return '已进入人工客服队列，请等待接入';
@@ -1891,7 +2195,7 @@
             state.kefuConversationId = data.kefu_conversation_id || null;
         }
         const statusValue = Number(state.handoffStatus || 0);
-        state.chatMode = statusValue === 1 ? 'waiting_human' : statusValue === 2 ? 'human' : 'ai';
+        state.chatMode = statusValue === 1 ? 'waiting_human' : statusValue === 2 ? 'human' : statusValue === 3 ? 'closed' : 'ai';
         dom.handoffStatusText.textContent = isError ? '转人工状态获取失败' : handoffText(statusValue);
         dom.handoffStatusText.className = 'handoff-status';
         if (isError) dom.handoffStatusText.classList.add('error');
@@ -1907,7 +2211,7 @@
             connectKefuUserWebSocket(state.kefuConversationId);
             loadKefuHistory(state.kefuConversationId);
         }
-        if (statusValue === 3) {
+        if (statusValue === 0 || statusValue === 3) {
             closeKefuUserWebSocket();
         }
     }
@@ -1920,6 +2224,7 @@
         });
         if (res.ok) {
             updateHandoffUi(res.data);
+            loadSessionHistory(true);
         } else if (!silent && res.status !== 404) {
             updateHandoffUi(null, true);
             showToast(res.data?.detail?.message || res.error || '转人工状态获取失败', 'error');
@@ -1951,6 +2256,7 @@
 
         if (res.ok) {
             updateHandoffUi(res.data);
+            loadSessionHistory(true);
             showToast('已进入人工客服队列', 'success');
         } else {
             updateHandoffUi(null, true);
@@ -2191,6 +2497,12 @@
         setAuthStatus(true, '已认证');
         console.debug('[Auth] Token acquired:', state.token.substring(0, 30) + '...');
 
+        const historyItems = await loadSessionHistory(true);
+        if (state.sessionId) {
+            await selectHistorySession(state.sessionId, { skipUrlUpdate: true });
+        } else if (historyItems && historyItems.length > 0) {
+            await selectHistorySession(historyItems[0].id);
+        }
         connectWebSocket();
     }
 
@@ -2460,6 +2772,9 @@
     window.clearDebugLog = clearDebugLog;
     window.askQuestion = askQuestion;
     window.requestHandoff = requestHandoff;
+    window.loadSessionHistory = loadSessionHistory;
+    window.selectHistorySession = selectHistorySession;
+    window.startNewSession = startNewSession;
     window.RequestLogger = RequestLogger;
 
     // ==================== Voice Input ====================

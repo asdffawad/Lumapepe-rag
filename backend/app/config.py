@@ -46,6 +46,7 @@ class RedisConfig:
     pool_size: int = 10
     socket_timeout: int = 5
     socket_connect_timeout: int = 5
+    required: bool = False
 
 
 @dataclass
@@ -199,6 +200,7 @@ def get_config() -> AppConfig:
             pool_size=int(os.getenv("REDIS_POOL_SIZE", "10")),
             socket_timeout=int(os.getenv("REDIS_SOCKET_TIMEOUT", "5")),
             socket_connect_timeout=int(os.getenv("REDIS_SOCKET_CONNECT_TIMEOUT", "5")),
+            required=_str_to_bool(os.getenv("REDIS_REQUIRED", "false")),
         ),
         milvus=MilvusConfig(
             host=os.getenv("MILVUS_HOST", "localhost") or "localhost",

@@ -66,8 +66,7 @@ USER appuser
 EXPOSE 8000
 
 # 启动命令：gunicorn + uvicorn worker
-# - workers: 默认 1。当前人工客服 WebSocket MVP 使用进程内连接管理；
-#   多 worker 会导致用户连接与客服发送落在不同进程，后续多实例需升级 Redis Pub/Sub。
+# - workers: 默认 1；人工客服 WebSocket 事件通过 Redis Pub/Sub 支持多 worker fan-out。
 # - threads: 4（每个 worker 4 线程）
 # - timeout: 300s（支持长连接和 RAG 生成）
 # - keep-alive: 5s

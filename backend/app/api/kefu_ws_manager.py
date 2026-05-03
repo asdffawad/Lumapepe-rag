@@ -1,10 +1,4 @@
-"""
-In-memory WebSocket connection manager for human kefu conversations.
-
-This MVP stores live connections in the current process only. Multi-instance
-deployments should replace the fan-out layer with Redis Pub/Sub or a message
-queue so events are delivered across backend replicas.
-"""
+"""Process-local WebSocket connection manager for human kefu conversations."""
 from __future__ import annotations
 
 from collections import defaultdict
@@ -68,7 +62,62 @@ class KefuConnectionManager:
         await self._send_many("user", cid, self.user_connections.get(cid, []), payload)
         await self._send_many("admin", cid, self.admin_connections.get(cid, []), payload)
 
-    async def _send_many(self, role: str, conversation_id: int, websockets: list[WebSocket], payload: dict[str, Any]) -> None:
+    async def dispatch_event(self, event: dict[str, Any]) -> dict[str, int]:
+        cid = int(event.get("conversation_id") or 0)
+        target = str(event.get("target") or "both")
+        payload = self._frontend_payload(event)
+        user_count = 0
+        admin_count = 0
+
+        if target in ("user", "both"):
+            user_count = await self._send_many("user", cid, self.user_connections.get(cid, []), payload)
+        if target in ("admin", "both"):
+            admin_count = await self._send_many("admin", cid, self.admin_connections.get(cid, []), payload)
+        if target == "all_admins":
+            admin_count = await self._send_many("admin", cid, self._all_admin_connections(), payload)
+
+        _logger.info(
+            "[kefu] local dispatch done",
+            extra={
+                "conversation_id": cid,
+                "event": event.get("event"),
+                "target": target,
+                "user_count": user_count,
+                "admin_count": admin_count,
+            },
+        )
+        return {"user_count": user_count, "admin_count": admin_count}
+
+    def local_counts(self, conversation_id: int | None = None) -> dict[str, int]:
+        if conversation_id is not None:
+            cid = int(conversation_id)
+            return {
+                "user_connections": len(self.user_connections.get(cid, [])),
+                "admin_connections": len(self.admin_connections.get(cid, [])),
+            }
+        return {
+            "user_connections": sum(len(items) for items in self.user_connections.values()),
+            "admin_connections": sum(len(items) for items in self.admin_connections.values()),
+        }
+
+    def _frontend_payload(self, event: dict[str, Any]) -> dict[str, Any]:
+        return {
+            key: value
+            for key, value in event.items()
+            if key not in {"target", "source", "source_instance_id", "created_at"}
+        }
+
+    def _all_admin_connections(self) -> list[WebSocket]:
+        seen: set[WebSocket] = set()
+        result: list[WebSocket] = []
+        for connections in self.admin_connections.values():
+            for websocket in connections:
+                if websocket not in seen:
+                    seen.add(websocket)
+                    result.append(websocket)
+        return result
+
+    async def _send_many(self, role: str, conversation_id: int, websockets: list[WebSocket], payload: dict[str, Any]) -> int:
         stale: list[WebSocket] = []
         sent = 0
         event = payload.get("event") if isinstance(payload, dict) else None
@@ -104,6 +153,7 @@ class KefuConnectionManager:
                 "event": event,
             },
         )
+        return sent
 
 
 _kefu_connection_manager = KefuConnectionManager()

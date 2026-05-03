@@ -21,6 +21,7 @@ from app.database.connection import get_db_pool
 from app.middleware.auth import AuthUser, JWTError, get_admin_user, get_current_user, verify_ws_token
 from app.api.kefu_ws_manager import get_kefu_connection_manager
 from app.logging_config import get_logger
+from app.services.redis_pubsub import publish_kefu_event
 
 
 router = APIRouter(tags=["kefu"])
@@ -104,18 +105,20 @@ def _jsonable(value: Any) -> Any:
     return value
 
 
-def _message_event(conversation_id: int, message: dict) -> dict:
+def _message_event(conversation_id: int, message: dict, target: str = "both") -> dict:
     return {
         "event": "message.new",
         "conversation_id": int(conversation_id),
+        "target": target,
         "message": _jsonable(message),
     }
 
 
-def _status_event(conversation_id: int, handoff_status: int, conversation_status: int | None) -> dict:
+def _status_event(conversation_id: int, handoff_status: int, conversation_status: int | None, target: str = "both") -> dict:
     return {
         "event": "handoff.status_changed",
         "conversation_id": int(conversation_id),
+        "target": target,
         "handoff_status": handoff_status,
         "conversation_status": conversation_status,
     }
@@ -911,7 +914,7 @@ async def request_handoff(
 
     if created:
         summary = session.get("summary") or "暂无摘要"
-        await repo.insert_kefu_message(
+        system_message = await repo.insert_kefu_message(
             conversation_id=conversation["id"],
             sender_id=0,
             sender_type=SENDER_SYSTEM,
@@ -920,6 +923,16 @@ async def request_handoff(
             content=f"用户请求转人工。AI 会话摘要：{summary}",
             tenant_id=member_user.get("tenant_id") or 0,
         )
+        await publish_kefu_event({
+            "event": "handoff.requested",
+            "conversation_id": conversation["id"],
+            "target": "all_admins",
+            "conversation_status": conversation.get("status"),
+            "handoff_status": handoff_status,
+            "session_id": session["id"],
+            "member_user_id": member_user["id"],
+        })
+        await publish_kefu_event(_message_event(conversation["id"], system_message, target="all_admins"))
 
     return {
         "session_id": session["id"],
@@ -1071,20 +1084,19 @@ async def send_admin_kefu_message(
         )
         _raise_send_error(exc)
 
-    manager = get_kefu_connection_manager()
     _logger.info(
-        "[kefu] websocket push to user start",
+        "[kefu] realtime publish to user start",
         extra={"conversation_id": conversation_id, "message_id": message.get("id")},
     )
     try:
-        await manager.send_to_user(conversation_id, _message_event(conversation_id, message))
+        await publish_kefu_event(_message_event(conversation_id, message, target="user"))
         _logger.info(
-            "[kefu] websocket push to user done",
+            "[kefu] realtime publish to user done",
             extra={"conversation_id": conversation_id, "message_id": message.get("id")},
         )
     except Exception as exc:
         _logger.error(
-            "[kefu] websocket push to user failed after db insert",
+            "[kefu] realtime publish to user failed after db insert",
             extra={"conversation_id": conversation_id, "message_id": message.get("id"), "error": str(exc)},
         )
     return {"conversation_id": conversation_id, "message": _jsonable(message)}
@@ -1131,19 +1143,16 @@ async def accept_handoff_request(
         content=f"客服 {admin_user.get('nickname') or admin_user.get('username') or admin_user['id']} 已接入",
         tenant_id=conversation.get("tenant_id") or 0,
     )
-    manager = get_kefu_connection_manager()
-    await manager.broadcast_conversation(conversation_id, {
+    await publish_kefu_event({
         "event": "conversation.accepted",
         "conversation_id": conversation_id,
+        "target": "both",
         "conversation_status": conversation.get("status"),
         "handoff_status": HANDOFF_ACCEPTED,
         "assigned_admin_id": conversation.get("assigned_admin_id"),
     })
-    await manager.broadcast_conversation(
-        conversation_id,
-        _status_event(conversation_id, HANDOFF_ACCEPTED, conversation.get("status")),
-    )
-    await manager.broadcast_conversation(conversation_id, _message_event(conversation_id, system_message))
+    await publish_kefu_event(_status_event(conversation_id, HANDOFF_ACCEPTED, conversation.get("status"), target="both"))
+    await publish_kefu_event(_message_event(conversation_id, system_message, target="both"))
 
     return {
         "kefu_conversation_id": conversation_id,
@@ -1194,21 +1203,18 @@ async def close_handoff_request(
         content=f"客服请求已关闭。原因：{request.close_reason or '未填写'}。{note}",
         tenant_id=conversation.get("tenant_id") or 0,
     )
-    manager = get_kefu_connection_manager()
-    await manager.broadcast_conversation(conversation_id, {
+    await publish_kefu_event({
         "event": "conversation.closed",
         "conversation_id": conversation_id,
+        "target": "both",
         "conversation_status": conversation.get("status"),
         "handoff_status": HANDOFF_CLOSED,
         "close_reason": request.close_reason,
         "resolution_note": request.resolution_note,
         "closed_at": closed_at,
     })
-    await manager.broadcast_conversation(
-        conversation_id,
-        _status_event(conversation_id, HANDOFF_CLOSED, conversation.get("status")),
-    )
-    await manager.broadcast_conversation(conversation_id, _message_event(conversation_id, system_message))
+    await publish_kefu_event(_status_event(conversation_id, HANDOFF_CLOSED, conversation.get("status"), target="both"))
+    await publish_kefu_event(_message_event(conversation_id, system_message, target="both"))
 
     return {
         "kefu_conversation_id": conversation_id,
@@ -1284,7 +1290,7 @@ async def websocket_kefu_user(
                 "message_id": message["id"],
                 "conversation_id": conversation_id,
             })
-            await manager.send_to_admin(conversation_id, _message_event(conversation_id, message))
+            await publish_kefu_event(_message_event(conversation_id, message, target="admin"))
     except WebSocketDisconnect:
         pass
     finally:
@@ -1416,18 +1422,18 @@ async def websocket_kefu_admin(
                 "conversation_id": conversation_id,
             })
             _logger.info(
-                "[kefu] websocket push to user start",
+                "[kefu] realtime publish to user start",
                 extra={"conversation_id": conversation_id, "message_id": message.get("id")},
             )
             try:
-                await manager.send_to_user(conversation_id, _message_event(conversation_id, message))
+                await publish_kefu_event(_message_event(conversation_id, message, target="user"))
                 _logger.info(
-                    "[kefu] websocket push to user done",
+                    "[kefu] realtime publish to user done",
                     extra={"conversation_id": conversation_id, "message_id": message.get("id")},
                 )
             except Exception as exc:
                 _logger.error(
-                    "[kefu] websocket push to user failed after db insert",
+                    "[kefu] realtime publish to user failed after db insert",
                     extra={"conversation_id": conversation_id, "message_id": message.get("id"), "error": str(exc)},
                 )
     except WebSocketDisconnect:

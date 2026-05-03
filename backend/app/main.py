@@ -68,13 +68,36 @@ async def lifespan(app: FastAPI):
         logger.error("MySQL connection failed", extra={"error": str(e)})
 
     # 连接 Redis（异步客户端）
+    app.state.redis_pool = None
+    app.state.redis_client = None
     try:
         pool = await create_redis_pool(config.redis.url)
         app.state.redis_pool = pool
         app.state.redis_client = get_redis_client()
-        logger.info("Redis connected", extra={"url": config.redis.url})
+        from app.services.redis_pubsub import mask_redis_url
+        logger.info("Redis connected", extra={"url": mask_redis_url(config.redis.url)})
     except Exception as e:
         logger.error("Redis connection failed", extra={"error": str(e)})
+
+    # 启动人工客服 Redis Pub/Sub。Redis 不可用时不阻断基础 HTTP/DB 功能，
+    # REDIS_REQUIRED=true 时才让启动失败。
+    try:
+        from app.services.redis_pubsub import get_redis_pubsub_manager
+        kefu_pubsub = get_redis_pubsub_manager(config.redis.url, redis_required=config.redis.required)
+        app.state.kefu_pubsub_manager = kefu_pubsub
+        connected = await kefu_pubsub.connect()
+        logger.info(
+            "Kefu Redis Pub/Sub initialized",
+            extra={
+                "connected": connected,
+                "channel": kefu_pubsub.channel,
+                "instance_id": kefu_pubsub.instance_id,
+            },
+        )
+    except Exception as e:
+        logger.warning("Kefu Redis Pub/Sub init failed", extra={"error": str(e)})
+        if config.redis.required:
+            raise
 
     # 初始化 Embedding 服务
     EmbeddingService.init(config, redis_client=app.state.redis_client)
@@ -244,6 +267,11 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
+        if hasattr(app.state, "kefu_pubsub_manager") and app.state.kefu_pubsub_manager:
+            await app.state.kefu_pubsub_manager.disconnect()
+    except Exception:
+        pass
+    try:
         # 停止商品字典自动重载
         if hasattr(app.state, 'product_service') and app.state.product_service:
             try:
@@ -344,8 +372,10 @@ def create_app() -> FastAPI:
 
     # 注册路由
     app.include_router(chat.router)
+    app.include_router(chat.sessions_router)
     app.include_router(intent.router)
     app.include_router(health.router)
+    app.include_router(health.public_router)
     app.include_router(admin.router)
     app.include_router(kefu.router)
     app.include_router(debug.router)

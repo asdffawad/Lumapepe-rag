@@ -27,6 +27,13 @@ class SessionRecord:
     tenant_id: int = 0
     handoff_status: int = 0
     handoff_at: Optional[datetime] = None
+    title: Optional[str] = None
+    last_message_content: Optional[str] = None
+    last_message_role: Optional[str] = None
+    last_message_at: Optional[datetime] = None
+    message_count: int = 0
+    pinned: int = 0
+    archived: int = 0
 
 
 class SessionRepository:
@@ -80,6 +87,156 @@ class SessionRepository:
                 await cur.execute("SELECT * FROM ragz_sessions WHERE id = %s", (session_id,))
                 row = await cur.fetchone()
                 return self._row_to_record(row) if row else None
+
+    async def list_history_for_user(
+        self,
+        user_id: str,
+        *,
+        limit: int = 20,
+        offset: int = 0,
+    ) -> list[dict]:
+        member_user_id = int(user_id) if str(user_id).isdigit() else None
+        where_clause = "s.user_id = %s"
+        params: list[object] = [user_id]
+        if member_user_id is not None:
+            where_clause = "(s.user_id = %s OR s.member_user_id = %s)"
+            params.append(member_user_id)
+        params.extend([limit, offset])
+
+        async with self.pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                try:
+                    await cur.execute(
+                        f"""
+                        SELECT
+                            s.id,
+                            s.user_id,
+                            s.member_user_id,
+                            s.title,
+                            s.summary,
+                            s.intent,
+                            s.status,
+                            s.handoff_status,
+                            s.kefu_conversation_id,
+                            s.created_at,
+                            s.updated_at,
+                            COALESCE(NULLIF(s.last_message_content, ''), (
+                                SELECT m.content
+                                FROM ragz_messages m
+                                WHERE m.session_id = s.id
+                                ORDER BY m.created_at DESC, m.id DESC
+                                LIMIT 1
+                            )) AS last_message,
+                            COALESCE(NULLIF(s.last_message_role, ''), (
+                                SELECT m.role
+                                FROM ragz_messages m
+                                WHERE m.session_id = s.id
+                                ORDER BY m.created_at DESC, m.id DESC
+                                LIMIT 1
+                            )) AS last_message_role,
+                            COALESCE(s.last_message_at, (
+                                SELECT m.created_at
+                                FROM ragz_messages m
+                                WHERE m.session_id = s.id
+                                ORDER BY m.created_at DESC, m.id DESC
+                                LIMIT 1
+                            ), s.updated_at, s.created_at) AS last_message_at,
+                            GREATEST(COALESCE(s.message_count, 0), (
+                                SELECT COUNT(*)
+                                FROM ragz_messages m
+                                WHERE m.session_id = s.id
+                            )) AS message_count,
+                            COALESCE(s.pinned, 0) AS pinned,
+                            COALESCE(s.archived, 0) AS archived
+                        FROM ragz_sessions s
+                        WHERE {where_clause}
+                        ORDER BY
+                            COALESCE(s.pinned, 0) DESC,
+                            COALESCE(s.last_message_at, (
+                                SELECT MAX(m.created_at)
+                                FROM ragz_messages m
+                                WHERE m.session_id = s.id
+                            ), s.updated_at, s.created_at) DESC,
+                            s.created_at DESC
+                        LIMIT %s OFFSET %s
+                        """,
+                        tuple(params),
+                    )
+                except Exception as e:
+                    if "Unknown column" not in str(e):
+                        raise
+                    await cur.execute(
+                        f"""
+                        SELECT
+                            s.id,
+                            s.user_id,
+                            s.member_user_id,
+                            NULL AS title,
+                            s.summary,
+                            s.intent,
+                            s.status,
+                            s.handoff_status,
+                            s.kefu_conversation_id,
+                            s.created_at,
+                            s.updated_at,
+                            (
+                                SELECT m.content
+                                FROM ragz_messages m
+                                WHERE m.session_id = s.id
+                                ORDER BY m.created_at DESC, m.id DESC
+                                LIMIT 1
+                            ) AS last_message,
+                            (
+                                SELECT m.role
+                                FROM ragz_messages m
+                                WHERE m.session_id = s.id
+                                ORDER BY m.created_at DESC, m.id DESC
+                                LIMIT 1
+                            ) AS last_message_role,
+                            COALESCE((
+                                SELECT m.created_at
+                                FROM ragz_messages m
+                                WHERE m.session_id = s.id
+                                ORDER BY m.created_at DESC, m.id DESC
+                                LIMIT 1
+                            ), s.updated_at, s.created_at) AS last_message_at,
+                            (
+                                SELECT COUNT(*)
+                                FROM ragz_messages m
+                                WHERE m.session_id = s.id
+                            ) AS message_count,
+                            0 AS pinned,
+                            0 AS archived
+                        FROM ragz_sessions s
+                        WHERE {where_clause}
+                        ORDER BY
+                            COALESCE((
+                                SELECT MAX(m.created_at)
+                                FROM ragz_messages m
+                                WHERE m.session_id = s.id
+                            ), s.updated_at, s.created_at) DESC,
+                            s.created_at DESC
+                        LIMIT %s OFFSET %s
+                        """,
+                        tuple(params),
+                    )
+                return list(await cur.fetchall())
+
+    async def count_history_for_user(self, user_id: str) -> int:
+        member_user_id = int(user_id) if str(user_id).isdigit() else None
+        where_clause = "user_id = %s"
+        params: list[object] = [user_id]
+        if member_user_id is not None:
+            where_clause = "(user_id = %s OR member_user_id = %s)"
+            params.append(member_user_id)
+        async with self.pool.acquire() as conn:
+            async with conn.cursor() as cur:
+                await cur.execute(
+                    f"SELECT COUNT(*) FROM ragz_sessions WHERE {where_clause}",
+                    tuple(params),
+                )
+                row = await cur.fetchone()
+                return int(row[0] if row else 0)
 
     async def update_intent(self, session_id: str, intent: str):
         async with self.pool.acquire() as conn:
@@ -160,4 +317,11 @@ class SessionRepository:
             tenant_id=row.get("tenant_id") or 0,
             handoff_status=row.get("handoff_status") or 0,
             handoff_at=row.get("handoff_at"),
+            title=row.get("title"),
+            last_message_content=row.get("last_message_content"),
+            last_message_role=row.get("last_message_role"),
+            last_message_at=row.get("last_message_at"),
+            message_count=row.get("message_count") or 0,
+            pinned=row.get("pinned") or 0,
+            archived=row.get("archived") or 0,
         )
