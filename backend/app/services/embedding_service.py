@@ -126,16 +126,19 @@ class DashScopeEmbedding(EmbeddingBase):
         self,
         api_key: str,
         base_url: str = "https://dashscope.aliyuncs.com",
+        model_name: str = "text-embedding-v3",
         embed_cache: "EmbedCache | None" = None,
         max_retries: int = 3,
         timeout: int = 30,
+        dim: int = DEFAULT_DIM,
     ):
         self.api_key = api_key
         self.base_url = base_url.rstrip("/")
+        self.model_name = model_name
         self._embed_cache = embed_cache
         self._max_retries = max_retries
         self._timeout = timeout
-        self._dim: int | None = None
+        self._dim: int | None = dim
         self._client: httpx.AsyncClient | None = None
 
     def _get_client(self) -> httpx.AsyncClient:
@@ -274,7 +277,7 @@ class DashScopeEmbedding(EmbeddingBase):
                         "Content-Type": "application/json",
                     },
                     json={
-                        "model": "text-embedding-v3",
+                        "model": self.model_name,
                         "input": texts,
                     },
                 )
@@ -308,7 +311,7 @@ class DashScopeEmbedding(EmbeddingBase):
                     extra={
                         "batch_size": len(texts),
                         "latency_ms": latency_ms,
-                        "model": "text-embedding-v3",
+                        "model": self.model_name,
                     }
                 )
                 return vectors, latency_ms
@@ -408,8 +411,8 @@ class EmbeddingService:
 
     @classmethod
     def init(cls, config: "AppConfig", redis_client=None):
-        if config.llm.provider == "mock":
-            cls._instance = MockEmbedding()
+        if config.llm.provider == "mock" or config.embedding.provider == "mock":
+            cls._instance = MockEmbedding(dim=config.embedding.dim)
             _embed_logger.info("EmbeddingService initialized with MockEmbedding")
         else:
             embed_cache: EmbedCache | None = None
@@ -417,9 +420,11 @@ class EmbeddingService:
                 embed_cache = EmbedCache(redis_client)
 
             cls._instance = DashScopeEmbedding(
-                api_key=config.llm.api_key,
-                base_url=config.llm.base_url,
+                api_key=config.embedding.api_key,
+                base_url=config.embedding.base_url,
+                model_name=config.embedding.model_name,
                 embed_cache=embed_cache,
+                dim=config.embedding.dim,
             )
             _embed_logger.info("EmbeddingService initialized with DashScopeEmbedding")
 

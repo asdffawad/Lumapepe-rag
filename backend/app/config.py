@@ -27,6 +27,15 @@ class LLMConfig:
 
 
 @dataclass
+class EmbeddingConfig:
+    provider: str = "dashscope"
+    model_name: str = "text-embedding-v3"
+    api_key: str = ""
+    base_url: str = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    dim: int = 1024
+
+
+@dataclass
 class DBConfig:
     host: str = "localhost"
     port: int = 3306
@@ -146,6 +155,7 @@ class STTConfig:
 @dataclass
 class AppConfig:
     llm: LLMConfig = field(default_factory=LLMConfig)
+    embedding: EmbeddingConfig = field(default_factory=EmbeddingConfig)
     db: DBConfig = field(default_factory=DBConfig)
     redis: RedisConfig = field(default_factory=RedisConfig)
     milvus: MilvusConfig = field(default_factory=MilvusConfig)
@@ -169,19 +179,38 @@ def _str_to_bool(val: str | None) -> bool:
 
 @lru_cache
 def get_config() -> AppConfig:
+    llm_provider = os.getenv("LLM_PROVIDER", "mock")
+    if llm_provider == "openai":
+        llm_model_name = os.getenv("OPENAI_MODEL", os.getenv("LLM_MODEL_NAME", "gpt-4.1-mini"))
+        llm_fallback_models = os.getenv("OPENAI_FALLBACK_MODELS", os.getenv("LLM_FALLBACK_MODELS", ""))
+        llm_api_key = os.getenv("OPENAI_API_KEY", os.getenv("DASHSCOPE_API_KEY", ""))
+        llm_base_url = os.getenv("OPENAI_BASE_URL", os.getenv("LLM_BASE_URL", "https://api.openai.com/v1"))
+    else:
+        llm_model_name = os.getenv("LLM_MODEL_NAME", "qwen-max")
+        llm_fallback_models = os.getenv("LLM_FALLBACK_MODELS", "qwen-plus,qwen-turbo")
+        llm_api_key = os.getenv("DASHSCOPE_API_KEY", "")
+        llm_base_url = os.getenv("LLM_BASE_URL", "https://dashscope.aliyuncs.com")
+
     return AppConfig(
         llm=LLMConfig(
-            provider=os.getenv("LLM_PROVIDER", "mock"),
-            model_name=os.getenv("LLM_MODEL_NAME", "qwen-max"),
-            fallback_models=os.getenv("LLM_FALLBACK_MODELS", "qwen-plus,qwen-turbo").split(","),
-            api_key=os.getenv("DASHSCOPE_API_KEY", ""),
-            base_url=os.getenv("LLM_BASE_URL", "https://dashscope.aliyuncs.com"),
+            provider=llm_provider,
+            model_name=llm_model_name,
+            fallback_models=[m for m in llm_fallback_models.split(",") if m],
+            api_key=llm_api_key,
+            base_url=llm_base_url,
             timeout=int(os.getenv("LLM_TIMEOUT", "60")),
             max_retries=int(os.getenv("LLM_MAX_RETRIES", "3")),
             default_temperature=float(os.getenv("LLM_TEMPERATURE", "0.7")),
             default_max_tokens=int(os.getenv("LLM_MAX_TOKENS", "2048")),
             max_input_tokens=int(os.getenv("LLM_MAX_INPUT_TOKENS", "4096")),
             max_output_tokens=int(os.getenv("LLM_MAX_OUTPUT_TOKENS", "2048")),
+        ),
+        embedding=EmbeddingConfig(
+            provider=os.getenv("EMBEDDING_PROVIDER", "dashscope"),
+            model_name=os.getenv("EMBEDDING_MODEL_NAME", "text-embedding-v3"),
+            api_key=os.getenv("EMBEDDING_API_KEY", os.getenv("DASHSCOPE_API_KEY", "")),
+            base_url=os.getenv("EMBEDDING_BASE_URL", "https://dashscope.aliyuncs.com/compatible-mode/v1"),
+            dim=int(os.getenv("EMBEDDING_DIM", "1024")),
         ),
         db=DBConfig(
             host=os.getenv("MYSQL_HOST", "localhost"),

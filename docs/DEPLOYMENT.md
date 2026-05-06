@@ -32,7 +32,7 @@
 - [ ] Docker 已安装并运行
 - [ ] Docker Compose 已安装
 - [ ] 端口未被占用：80, 443, 3306, 6379, 8000, 19530, 9091
-- [ ] 已获取 DashScope API Key（通义千问）
+- [ ] 已获取 OpenAI API Key（如继续使用 Qwen/STT/Embedding，则还需 DashScope API Key）
 - [ ] 防火墙/安全组已配置
 
 ### 数据准备
@@ -56,15 +56,26 @@ cp .env.example .env
 
 ```env
 # === LLM 配置（必填）===
-LLM_PROVIDER=qwen
-LLM_MODEL_NAME=qwen-max
-LLM_FALLBACK_MODELS=qwen-plus,qwen-turbo
-DASHSCOPE_API_KEY=sk-your-actual-key-here
-LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-your-actual-key-here
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4.1-mini
 LLM_TIMEOUT=60
 LLM_MAX_RETRIES=3
 LLM_TEMPERATURE=0.7
 LLM_MAX_TOKENS=2048
+EMBEDDING_PROVIDER=dashscope
+EMBEDDING_API_KEY=sk-your-dashscope-key-here
+EMBEDDING_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
+EMBEDDING_MODEL_NAME=text-embedding-v3
+EMBEDDING_DIM=1024
+
+# 如需继续使用 Qwen：
+# LLM_PROVIDER=qwen
+# LLM_MODEL_NAME=qwen-max
+# LLM_FALLBACK_MODELS=qwen-plus,qwen-turbo
+# DASHSCOPE_API_KEY=sk-your-actual-key-here
+# LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode/v1
 
 # === 安全配置（必填）===
 JWT_SECRET=your-random-secret-here-32chars
@@ -378,12 +389,12 @@ docker-compose config  # 验证配置
 #### Q2: LLM 调用失败
 
 ```bash
-# 检查 DashScope API Key
-grep DASHSCOPE_API_KEY .env
+# 检查 OpenAI API Key
+grep OPENAI_API_KEY .env
 
 # 测试 API 连通性
-curl https://dashscope.aliyuncs.com/compatible-mode/v1/models \
-  -H "Authorization: Bearer $DASHSCOPE_API_KEY"
+curl https://api.openai.com/v1/models \
+  -H "Authorization: Bearer $OPENAI_API_KEY"
 
 # 检查熔断器状态
 curl http://localhost:8000/api/v1/health/detailed
@@ -681,10 +692,18 @@ curl http://localhost:8000/api/v1/chat/history/{session_id}?user_id=user-001 \
 
 | 变量名 | 默认值 | 说明 |
 |--------|--------|------|
-| `LLM_PROVIDER` | qwen | LLM 提供商 (qwen/mock) |
+| `LLM_PROVIDER` | qwen | LLM 提供商 (qwen/openai/mock) |
 | `LLM_MODEL_NAME` | qwen-max | 主模型名称 |
 | `LLM_FALLBACK_MODELS` | qwen-plus,qwen-turbo | 降级模型列表 |
-| `DASHSCOPE_API_KEY` | - | DashScope API Key（必填） |
+| `DASHSCOPE_API_KEY` | - | DashScope API Key（Qwen、STT、Embedding 使用） |
+| `OPENAI_API_KEY` | - | OpenAI API Key（LLM_PROVIDER=openai 时必填） |
+| `OPENAI_BASE_URL` | https://api.openai.com/v1 | OpenAI API Base URL |
+| `OPENAI_MODEL` | gpt-4.1-mini | OpenAI 主模型名称 |
+| `EMBEDDING_PROVIDER` | dashscope | Embedding 提供商 |
+| `EMBEDDING_MODEL_NAME` | text-embedding-v3 | Embedding 模型名称 |
+| `EMBEDDING_API_KEY` | DASHSCOPE_API_KEY | Embedding API Key |
+| `EMBEDDING_BASE_URL` | https://dashscope.aliyuncs.com/compatible-mode/v1 | Embedding API Base URL |
+| `EMBEDDING_DIM` | 1024 | Embedding 向量维度，必须与 Qdrant/Milvus schema 一致 |
 | `JWT_SECRET` | - | JWT 签名密钥（必填） |
 | `CORS_ORIGINS` | * | 允许的 CORS 域名 |
 | `RATE_LIMIT_ENABLED` | true | 是否启用限流 |

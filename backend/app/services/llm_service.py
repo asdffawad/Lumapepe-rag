@@ -44,8 +44,12 @@ class TokenCounter:
         "qwen-max": "cl100k_base",
         "qwen-plus": "cl100k_base",
         "qwen-turbo": "cl100k_base",
+        "gpt-4.1": "cl100k_base",
+        "gpt-4.1-mini": "cl100k_base",
+        "gpt-4.1-nano": "cl100k_base",
         "gpt-4": "cl100k_base",
         "gpt-4o": "cl100k_base",
+        "gpt-4o-mini": "cl100k_base",
         "gpt-3.5-turbo": "cl100k_base",
     }
 
@@ -697,6 +701,58 @@ class QwenProvider(LLMBase, _BaseHTTPClientMixin):
             "qwen2-72b-instruct": 32 * 1024,
         }
         return windows.get(self.model_name, 8192)
+
+
+# ---------------------------------------------------------------------------
+# OpenAI Provider — Chat Completions
+# ---------------------------------------------------------------------------
+@register_provider("openai")
+class OpenAIProvider(QwenProvider):
+    """
+    OpenAI Provider
+    复用当前 OpenAI-compatible Chat Completions HTTP 实现。
+    """
+
+    def __init__(self, config: LLMConfig):
+        super().__init__(config)
+        _llm_logger.info("OpenAIProvider initialized", extra={
+            "model": self.model_name,
+            "base_url": self.base_url,
+            "timeout": self.timeout,
+            "max_retries": self.max_retries,
+        })
+
+    def _build_payload(
+        self,
+        messages: list[ChatMessage],
+        temperature: float,
+        max_tokens: int | None,
+        stream: bool = False,
+    ) -> dict:
+        payload = {
+            "model": self.model_name,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "temperature": temperature,
+        }
+        if max_tokens:
+            payload["max_completion_tokens"] = max_tokens
+        if stream:
+            payload["stream"] = True
+        return payload
+
+    @property
+    def provider_name(self) -> str:
+        return "openai"
+
+    def get_max_context_window(self) -> int:
+        windows = {
+            "gpt-4.1": 1_047_576,
+            "gpt-4.1-mini": 1_047_576,
+            "gpt-4.1-nano": 1_047_576,
+            "gpt-4o": 128 * 1024,
+            "gpt-4o-mini": 128 * 1024,
+        }
+        return windows.get(self.model_name, 128 * 1024)
 
 
 # ---------------------------------------------------------------------------

@@ -39,6 +39,18 @@ docker compose logs -f backend
 编辑 `.env` 文件：
 
 ```env
+# OpenAI / ChatGPT
+LLM_PROVIDER=openai
+OPENAI_API_KEY=sk-xxxxxxxxxxxxxxxx
+OPENAI_BASE_URL=https://api.openai.com/v1
+OPENAI_MODEL=gpt-4.1-mini
+EMBEDDING_PROVIDER=dashscope
+EMBEDDING_API_KEY=sk-xxxxxxxxxxxxxxxx
+```
+
+如需继续使用 Qwen：
+
+```env
 LLM_PROVIDER=qwen
 LLM_MODEL_NAME=qwen-max
 DASHSCOPE_API_KEY=sk-xxxxxxxxxxxxxxxx
@@ -462,7 +474,7 @@ docker exec rag-backend python -m pytest tests/ -v
 docker exec rag-backend python /app/backend/tests/test_admin_integration.py
 # 结果：ALL 10 TESTS PASSED（CRUD + 向量检索 + 过滤搜索 + 删除）
 
-# 端到端 API 测试（qwen-max 真实 LLM）
+# 端到端 API 测试（真实 LLM：openai 或 qwen）
 # POST /api/v1/chat — product_qa / order_query / refund_return / intent
 # 结果：4/4 PASSED
 
