@@ -35,6 +35,10 @@ docker compose logs -f backend
 > **注意**：MySQL 不随本项目 Compose 在服务器 A 启动；请在 `.env` 中将 `DB_HOST` 设置为服务器 B 的 MySQL IP，数据库名保持 `lumapepe`。
 > 可用 `GET /api/health/db` 或 `GET /api/v1/health/db` 检查容器实际连接到的库和必需业务表。
 
+### 商城后端 lumapepe（Java）连接 `/ws/chat` 换票
+
+在 RAG `.env` 中设置 `RAG_PROXY_INTERNAL_KEY`（随机长串），重启后端后可通过 `POST /internal/v1/rag-proxy/token` 签发代理 JWT；lumapepe 配置 `token-fetch-url` 与相同密钥即可自动拉取，无需在商城侧配置 `JWT_SECRET`。详见 [`docs/lumapepe-proxy-token.md`](docs/lumapepe-proxy-token.md)。
+
 ### 3. 使用真实 LLM（可选）
 
 编辑 `.env` 文件：

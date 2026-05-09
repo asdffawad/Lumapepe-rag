@@ -31,7 +31,7 @@ from app.services.reranker import MockReranker, MMRReranker
 from app.services.prompt_builder import MockPromptBuilder, EcommercePromptBuilder
 from app.services.llm_generator import MockLLMGenerator, StandardLLMGenerator
 from app.services.stt_service import STTFactory, STTConfig as STTServiceConfig
-from app.api import chat, intent, health, admin, debug, websocket, product, voice_ws, kefu
+from app.api import chat, intent, health, admin, debug, websocket, product, voice_ws, internal_proxy
 from app import metrics
 from app.logging_config import get_logger as _get_logger
 
@@ -60,61 +60,21 @@ async def lifespan(app: FastAPI):
 
     # 连接 MySQL
     logger = _get_logger("app.startup")
-    db_log_context = {
-        "db_host": config.db.host,
-        "db_port": config.db.port,
-        "db_name": config.db.database,
-        "db_user": config.db.user,
-        "db_connect_retries": config.db.connect_retries,
-        "db_connect_timeout": config.db.connect_timeout,
-    }
-    logger.info("MySQL config loaded", extra=db_log_context)
     try:
         pool = await create_db_pool(config.db)
         app.state.db_pool = pool
-        logger.info("MySQL connected", extra=db_log_context)
+        logger.info("MySQL connected", extra={"host": config.db.host, "database": config.db.database})
     except Exception as e:
-        error_message = str(e).replace(config.db.password, "***") if config.db.password else str(e)
-        logger.error(
-            "MySQL connection failed",
-            extra={
-                **db_log_context,
-                "error": f"{type(e).__name__}: {error_message}",
-            },
-        )
-        raise
+        logger.error("MySQL connection failed", extra={"error": str(e)})
 
     # 连接 Redis（异步客户端）
-    app.state.redis_pool = None
-    app.state.redis_client = None
     try:
         pool = await create_redis_pool(config.redis.url)
         app.state.redis_pool = pool
         app.state.redis_client = get_redis_client()
-        from app.services.redis_pubsub import mask_redis_url
-        logger.info("Redis connected", extra={"url": mask_redis_url(config.redis.url)})
+        logger.info("Redis connected", extra={"url": config.redis.url})
     except Exception as e:
         logger.error("Redis connection failed", extra={"error": str(e)})
-
-    # 启动人工客服 Redis Pub/Sub。Redis 不可用时不阻断基础 HTTP/DB 功能，
-    # REDIS_REQUIRED=true 时才让启动失败。
-    try:
-        from app.services.redis_pubsub import get_redis_pubsub_manager
-        kefu_pubsub = get_redis_pubsub_manager(config.redis.url, redis_required=config.redis.required)
-        app.state.kefu_pubsub_manager = kefu_pubsub
-        connected = await kefu_pubsub.connect()
-        logger.info(
-            "Kefu Redis Pub/Sub initialized",
-            extra={
-                "connected": connected,
-                "channel": kefu_pubsub.channel,
-                "instance_id": kefu_pubsub.instance_id,
-            },
-        )
-    except Exception as e:
-        logger.warning("Kefu Redis Pub/Sub init failed", extra={"error": str(e)})
-        if config.redis.required:
-            raise
 
     # 初始化 Embedding 服务
     EmbeddingService.init(config, redis_client=app.state.redis_client)
@@ -284,11 +244,6 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
     try:
-        if hasattr(app.state, "kefu_pubsub_manager") and app.state.kefu_pubsub_manager:
-            await app.state.kefu_pubsub_manager.disconnect()
-    except Exception:
-        pass
-    try:
         # 停止商品字典自动重载
         if hasattr(app.state, 'product_service') and app.state.product_service:
             try:
@@ -356,7 +311,14 @@ def create_app() -> FastAPI:
         allow_origins=cors_origins,
         allow_credentials=allow_creds,
         allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-        allow_headers=["Authorization", "Content-Type", "X-API-Key", "X-Request-ID", "X-HTTP-Method-Override"],
+        allow_headers=[
+            "Authorization",
+            "Content-Type",
+            "X-API-Key",
+            "X-Request-ID",
+            "X-HTTP-Method-Override",
+            "X-RAG-Proxy-Key",
+        ],
     )
 
     # Request ID 中间件
@@ -389,15 +351,14 @@ def create_app() -> FastAPI:
 
     # 注册路由
     app.include_router(chat.router)
-    app.include_router(chat.sessions_router)
     app.include_router(intent.router)
     app.include_router(health.router)
-    app.include_router(health.public_router)
     app.include_router(admin.router)
-    app.include_router(kefu.router)
     app.include_router(debug.router)
     app.include_router(websocket.router)
     app.include_router(voice_ws.router)
+    # 商城 lumapepe 代理换票（须配置 RAG_PROXY_INTERNAL_KEY；建议仅内网访问）
+    app.include_router(internal_proxy.router)
 
     # 注册 metrics 路由（Prometheus 采集）
     app.include_router(metrics.router)

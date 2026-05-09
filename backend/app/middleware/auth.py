@@ -397,8 +397,17 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next):
         import time
 
-        # 跳过限流的路径
-        skip_paths = {"/", "/docs", "/redoc", "/openapi.json", "/health", "/metrics"}
+        # 跳过限流的路径（含商城代理换票，避免刷 JWT 触发全局限流）
+        skip_paths = {
+            "/",
+            "/docs",
+            "/redoc",
+            "/openapi.json",
+            "/health",
+            "/metrics",
+            "/internal/v1/rag-proxy/token",
+            "/internal/v1/rag-proxy/health",
+        }
         if request.url.path.startswith("/docs") or request.url.path in skip_paths:
             return await call_next(request)
 
