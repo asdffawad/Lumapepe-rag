@@ -188,6 +188,8 @@ class FakeKefuRepository:
             if not cid or session.get("handoff_status") not in (1, 2):
                 continue
             conversation = self.conversations[cid]
+            if conversation["status"] not in (0, 1):
+                continue
             member = self.members[conversation["user_id"]]
             rows.append({
                 "kefu_conversation_id": cid,
@@ -349,6 +351,99 @@ class _FakePool:
         return _FakeAcquire(self.row)
 
 
+class _SqlCaptureCursor:
+    def __init__(self, rows):
+        self.rows = rows
+        self.executed_sql = ""
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def execute(self, sql, params=None):
+        self.executed_sql = sql
+
+    async def fetchall(self):
+        return self.rows
+
+
+class _SqlCaptureConn:
+    def __init__(self, cursor):
+        self.cursor_obj = cursor
+
+    def cursor(self, *args, **kwargs):
+        return self.cursor_obj
+
+
+class _SqlCaptureAcquire:
+    def __init__(self, cursor):
+        self.cursor = cursor
+
+    async def __aenter__(self):
+        return _SqlCaptureConn(self.cursor)
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _SqlCapturePool:
+    def __init__(self, cursor):
+        self.cursor = cursor
+
+    def acquire(self):
+        return _SqlCaptureAcquire(self.cursor)
+
+
+class _RecordingCursor:
+    def __init__(self):
+        self.statements = []
+        self.lastrowid = 123
+
+    async def __aenter__(self):
+        return self
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+    async def execute(self, sql, params=None):
+        self.statements.append((sql, params))
+
+    async def fetchone(self):
+        return {"id": self.lastrowid, "status": 0, "assigned_admin_id": None}
+
+
+class _RecordingConn:
+    def __init__(self, cursor):
+        self.cursor_obj = cursor
+
+    def cursor(self, *args, **kwargs):
+        return self.cursor_obj
+
+    async def commit(self):
+        return None
+
+
+class _RecordingAcquire:
+    def __init__(self, cursor):
+        self.cursor = cursor
+
+    async def __aenter__(self):
+        return _RecordingConn(self.cursor)
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class _RecordingPool:
+    def __init__(self, cursor):
+        self.cursor = cursor
+
+    def acquire(self):
+        return _RecordingAcquire(self.cursor)
+
+
 @pytest.fixture
 def fake_repo():
     return FakeKefuRepository()
@@ -438,14 +533,110 @@ async def test_repository_resolves_existing_numeric_member_even_if_soft_deleted(
 
 
 @pytest.mark.asyncio
-async def test_repeated_handoff_reuses_existing_conversation(kefu_client, fake_repo):
-    first = await request_handoff(kefu_client)
-    second = await request_handoff(kefu_client)
+async def test_admin_handoff_request_query_excludes_closed_conversations():
+    from app.api.kefu import KefuRepository
 
-    assert first.status_code == 200
-    assert second.status_code == 200
-    assert first.json()["kefu_conversation_id"] == second.json()["kefu_conversation_id"]
+    cursor = _SqlCaptureCursor([])
+    repo = KefuRepository(_SqlCapturePool(cursor))
+
+    await repo.list_handoff_requests()
+
+    assert "s.handoff_status IN (1, 2)" in cursor.executed_sql
+    assert "c.status IN (0, 1)" in cursor.executed_sql
+
+
+@pytest.mark.asyncio
+async def test_kefu_conversation_insert_uses_local_time_fields():
+    from app.api.kefu import KefuRepository
+
+    cursor = _RecordingCursor()
+    repo = KefuRepository(_RecordingPool(cursor))
+
+    await repo.create_conversation(
+        {"id": 288, "tenant_id": 0},
+        {"tenant_id": 0},
+        "转人工",
+    )
+
+    insert_sql = cursor.statements[0][0]
+    assert "create_time, update_time" in insert_sql
+    assert "DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)" in insert_sql
+
+
+@pytest.mark.asyncio
+async def test_kefu_last_message_updates_sender_specific_time_fields():
+    from app.api.kefu import KefuRepository
+
+    cursor = _RecordingCursor()
+    repo = KefuRepository(_RecordingPool(cursor))
+
+    await repo._update_conversation_last_message(
+        123,
+        content="用户消息",
+        content_type=1,
+        unread_field="admin_unread_message_count",
+    )
+    await repo._update_conversation_last_message(
+        123,
+        content="客服回复",
+        content_type=1,
+        unread_field="user_unread_message_count",
+    )
+
+    user_update_sql = cursor.statements[0][0]
+    admin_update_sql = cursor.statements[1][0]
+    assert "last_user_message_time = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)" in user_update_sql
+    assert "last_admin_reply_time = DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)" in admin_update_sql
+
+
+@pytest.mark.asyncio
+async def test_repeated_handoff_reuses_existing_conversation(fake_repo):
+    from app.api import kefu
+    from app.middleware.auth import AuthUser
+
+    first = await kefu.request_handoff(kefu.HandoffRequest(session_id="sess-1"), AuthUser(user_id="288"), fake_repo)
+    second = await kefu.request_handoff(kefu.HandoffRequest(session_id="sess-1"), AuthUser(user_id="288"), fake_repo)
+
+    assert first["kefu_conversation_id"] == second["kefu_conversation_id"]
     assert len(fake_repo.conversations) == 1
+
+
+@pytest.mark.asyncio
+async def test_accepted_handoff_request_reuses_existing_conversation(fake_repo):
+    from app.api import kefu
+    from app.middleware.auth import AuthUser
+
+    first = await kefu.request_handoff(kefu.HandoffRequest(session_id="sess-1"), AuthUser(user_id="288"), fake_repo)
+    fake_repo.conversations[100]["status"] = 1
+    fake_repo.sessions["sess-1"]["handoff_status"] = 2
+
+    second = await kefu.request_handoff(kefu.HandoffRequest(session_id="sess-1"), AuthUser(user_id="288"), fake_repo)
+
+    assert first["kefu_conversation_id"] == second["kefu_conversation_id"]
+    assert second["handoff_status"] == 2
+    assert len(fake_repo.conversations) == 1
+
+
+@pytest.mark.asyncio
+async def test_closed_handoff_request_creates_new_conversation(fake_repo):
+    from app.api import kefu
+    from app.middleware.auth import AuthUser
+
+    await kefu.request_handoff(kefu.HandoffRequest(session_id="sess-1"), AuthUser(user_id="288"), fake_repo)
+    fake_repo.conversations[100]["status"] = 2
+    fake_repo.sessions["sess-1"]["handoff_status"] = 3
+
+    data = await kefu.request_handoff(kefu.HandoffRequest(session_id="sess-1"), AuthUser(user_id="288"), fake_repo)
+
+    assert data["kefu_conversation_id"] == 101
+    assert data["handoff_status"] == 1
+    assert data["conversation_status"] == 0
+    assert fake_repo.conversations[100]["status"] == 2
+    assert fake_repo.conversations[101]["status"] == 0
+    assert fake_repo.sessions["sess-1"]["kefu_conversation_id"] == 101
+    assert fake_repo.sessions["sess-1"]["handoff_status"] == 1
+    history = fake_repo.sessions["sess-1"]["metadata"]["handoff_history"]
+    assert {item["conversation_id"] for item in history} == {100, 101}
 
 
 @pytest.mark.asyncio
@@ -473,6 +664,22 @@ async def test_handoff_status_returns_current_state(kefu_client):
     assert data["handoff_status"] == 1
     assert data["conversation_status"] == 0
     assert data["assigned_admin_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_handoff_status_syncs_stale_session_when_conversation_closed(fake_repo):
+    from app.api import kefu
+    from app.middleware.auth import AuthUser
+
+    await kefu.request_handoff(kefu.HandoffRequest(session_id="sess-1"), AuthUser(user_id="288"), fake_repo)
+    fake_repo.conversations[100]["status"] = 2
+    fake_repo.sessions["sess-1"]["handoff_status"] = 2
+
+    data = await kefu.get_handoff_status("sess-1", AuthUser(user_id="288"), fake_repo)
+
+    assert data["handoff_status"] == 3
+    assert data["conversation_status"] == 2
+    assert fake_repo.sessions["sess-1"]["handoff_status"] == 3
 
 
 @pytest.mark.asyncio
@@ -891,3 +1098,161 @@ async def test_ws_chat_allows_ai_flow_after_handoff_closed(monkeypatch):
     )
 
     assert routed is False
+
+
+@pytest.mark.asyncio
+async def test_ws_chat_syncs_stale_handoff_when_conversation_already_closed(monkeypatch):
+    from app.api import kefu as kefu_module
+    from app.api import websocket as websocket_module
+
+    class StaleClosedRepo:
+        def __init__(self, pool):
+            self.created = False
+            self.sessions = {
+                "sess-1": {
+                    "id": "sess-1",
+                    "user_id": "288",
+                    "handoff_status": 2,
+                    "kefu_conversation_id": 100,
+                }
+            }
+
+        async def get_session(self, session_id):
+            return deepcopy(self.sessions.get(session_id))
+
+        async def get_conversation(self, conversation_id):
+            return {"id": conversation_id, "user_id": 288, "status": 2, "assigned_admin_id": 1, "tenant_id": 0}
+
+        async def update_session_handoff(self, session_id, *, handoff_status=None, **kwargs):
+            if handoff_status is not None:
+                self.sessions[session_id]["handoff_status"] = handoff_status
+            return deepcopy(self.sessions[session_id])
+
+        async def resolve_member_user(self, user_id):
+            return {"id": 288, "tenant_id": 0}
+
+        async def create_user_kefu_message(self, conversation, member_user, content):
+            self.created = True
+            return {"id": 1}
+
+    repo_holder = {}
+
+    def repo_factory(pool):
+        repo_holder["repo"] = StaleClosedRepo(pool)
+        return repo_holder["repo"]
+
+    monkeypatch.setattr(kefu_module, "KefuRepository", repo_factory)
+    monkeypatch.setattr(websocket_module, "get_db_pool", lambda: object())
+
+    routed = await websocket_module._route_to_kefu_if_handoff(
+        websocket=_FakeOutgoingWebSocket(),
+        session_id="sess-1",
+        user_id="288",
+        content="物流多久发货？",
+        handoff_hint=2,
+        conversation_hint=100,
+    )
+
+    assert routed is False
+    assert repo_holder["repo"].created is False
+    assert repo_holder["repo"].sessions["sess-1"]["handoff_status"] == 3
+
+
+@pytest.mark.asyncio
+async def test_ws_chat_reopens_handoff_when_closed_user_requests_human(monkeypatch):
+    from app.api import kefu as kefu_module
+    from app.api import websocket as websocket_module
+
+    class ReopenRepo:
+        def __init__(self, pool):
+            self.sessions = {
+                "sess-1": {
+                    "id": "sess-1",
+                    "user_id": "288",
+                    "member_user_id": 288,
+                    "kefu_conversation_id": 100,
+                    "tenant_id": 0,
+                    "handoff_status": 3,
+                    "handoff_at": datetime(2026, 4, 30, 10, 0, 0),
+                    "summary": "旧人工会话已关闭",
+                    "metadata": {"handoff": {"kefu_conversation_id": 100}},
+                    "updated_at": None,
+                }
+            }
+            self.conversations = {
+                100: {"id": 100, "user_id": 288, "status": 2, "assigned_admin_id": 1, "tenant_id": 0},
+            }
+            self.next_conversation_id = 101
+            self.created = False
+
+        async def get_session(self, session_id):
+            return deepcopy(self.sessions.get(session_id))
+
+        async def resolve_member_user(self, user_id):
+            return {"id": 288, "tenant_id": 0}
+
+        async def get_conversation(self, conversation_id):
+            return deepcopy(self.conversations.get(int(conversation_id)))
+
+        async def create_conversation(self, member_user, session, last_message_content):
+            self.created = True
+            cid = self.next_conversation_id
+            self.conversations[cid] = {
+                "id": cid,
+                "user_id": member_user["id"],
+                "status": 0,
+                "assigned_admin_id": None,
+                "tenant_id": 0,
+                "last_message_content": last_message_content,
+            }
+            return deepcopy(self.conversations[cid])
+
+        async def update_session_handoff(self, session_id, *, member_user_id=None, kefu_conversation_id=None, handoff_status=None, metadata_updates=None, set_handoff_at=False):
+            session = self.sessions[session_id]
+            if member_user_id is not None:
+                session["member_user_id"] = member_user_id
+            if kefu_conversation_id is not None:
+                session["kefu_conversation_id"] = kefu_conversation_id
+            if handoff_status is not None:
+                session["handoff_status"] = handoff_status
+            if set_handoff_at:
+                session["handoff_at"] = datetime(2026, 4, 30, 11, 0, 0)
+            if metadata_updates:
+                session["metadata"].update(metadata_updates)
+            return deepcopy(session)
+
+        async def link_session_messages(self, session_id, *, member_user_id, kefu_conversation_id):
+            return None
+
+        async def insert_kefu_message(self, **kwargs):
+            return {
+                "id": 900,
+                "conversation_id": kwargs["conversation_id"],
+                "sender_type": kwargs["sender_type"],
+                "content": kwargs["content"],
+                "create_time": datetime(2026, 4, 30, 11, 0, 1),
+            }
+
+    repo = ReopenRepo(object())
+    monkeypatch.setattr(kefu_module, "KefuRepository", lambda pool: repo)
+    monkeypatch.setattr(websocket_module, "get_db_pool", lambda: object())
+
+    ws = _FakeOutgoingWebSocket()
+    routed = await websocket_module._route_to_kefu_if_handoff(
+        websocket=ws,
+        session_id="sess-1",
+        user_id="288",
+        content="转人工",
+        handoff_hint=3,
+        conversation_hint=100,
+    )
+
+    assert routed is True
+    assert repo.created is True
+    assert repo.conversations[100]["status"] == 2
+    assert repo.conversations[101]["status"] == 0
+    assert repo.sessions["sess-1"]["kefu_conversation_id"] == 101
+    assert repo.sessions["sess-1"]["handoff_status"] == 1
+    assert ws.sent[-1]["type"] == "done"
+    assert ws.sent[-1]["intent"] == "human_handoff"
+    assert ws.sent[-1]["kefu_conversation_id"] == 101

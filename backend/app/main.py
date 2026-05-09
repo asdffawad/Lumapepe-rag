@@ -60,12 +60,29 @@ async def lifespan(app: FastAPI):
 
     # 连接 MySQL
     logger = _get_logger("app.startup")
+    db_log_context = {
+        "db_host": config.db.host,
+        "db_port": config.db.port,
+        "db_name": config.db.database,
+        "db_user": config.db.user,
+        "db_connect_retries": config.db.connect_retries,
+        "db_connect_timeout": config.db.connect_timeout,
+    }
+    logger.info("MySQL config loaded", extra=db_log_context)
     try:
         pool = await create_db_pool(config.db)
         app.state.db_pool = pool
-        logger.info("MySQL connected", extra={"host": config.db.host, "database": config.db.database})
+        logger.info("MySQL connected", extra=db_log_context)
     except Exception as e:
-        logger.error("MySQL connection failed", extra={"error": str(e)})
+        error_message = str(e).replace(config.db.password, "***") if config.db.password else str(e)
+        logger.error(
+            "MySQL connection failed",
+            extra={
+                **db_log_context,
+                "error": f"{type(e).__name__}: {error_message}",
+            },
+        )
+        raise
 
     # 连接 Redis（异步客户端）
     app.state.redis_pool = None

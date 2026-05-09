@@ -91,12 +91,15 @@ services:
       # 监控
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENABLE_METRICS=${ENABLE_METRICS:-true}
-      # MySQL (本地数据库)
-      - MYSQL_HOST=${MYSQL_HOST:-host.docker.internal}
-      - MYSQL_PORT=${MYSQL_PORT:-3306}
-      - MYSQL_USER=${MYSQL_USER:-root}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-      - MYSQL_DATABASE=${MYSQL_DATABASE:-lumapepe}
+      # MySQL (远程数据库：服务器 B 的 Docker MySQL)
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-lumapepe}
+      - DB_CONNECT_RETRIES=${DB_CONNECT_RETRIES:-30}
+      - DB_CONNECT_RETRY_DELAY=${DB_CONNECT_RETRY_DELAY:-2}
+      - DB_CONNECT_TIMEOUT=${DB_CONNECT_TIMEOUT:-10}
     volumes:
       - ./data:/app/data:ro
       - ./scripts:/app/scripts:ro
@@ -106,11 +109,11 @@ services:
       qdrant:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/db"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 60s
+      start_period: 90s
     deploy:
       resources:
         limits:
@@ -156,12 +159,15 @@ services:
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/2
       # 日志
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      # MySQL (本地数据库)
-      - MYSQL_HOST=${MYSQL_HOST:-host.docker.internal}
-      - MYSQL_PORT=${MYSQL_PORT:-3306}
-      - MYSQL_USER=${MYSQL_USER:-root}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-      - MYSQL_DATABASE=${MYSQL_DATABASE:-lumapepe}
+      # MySQL (远程数据库：服务器 B 的 Docker MySQL)
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-lumapepe}
+      - DB_CONNECT_RETRIES=${DB_CONNECT_RETRIES:-30}
+      - DB_CONNECT_RETRY_DELAY=${DB_CONNECT_RETRY_DELAY:-2}
+      - DB_CONNECT_TIMEOUT=${DB_CONNECT_TIMEOUT:-10}
     volumes:
       - ./data:/app/data:ro
       - ./scripts:/app/scripts:ro
@@ -201,12 +207,15 @@ services:
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/2
       - REDBEAT_REDIS_URL=redis://:${REDIS_PASSWORD}@redis:6379/3
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      # MySQL (本地数据库)
-      - MYSQL_HOST=${MYSQL_HOST:-host.docker.internal}
-      - MYSQL_PORT=${MYSQL_PORT:-3306}
-      - MYSQL_USER=${MYSQL_USER:-root}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-      - MYSQL_DATABASE=${MYSQL_DATABASE:-lumapepe}
+      # MySQL (远程数据库：服务器 B 的 Docker MySQL)
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-lumapepe}
+      - DB_CONNECT_RETRIES=${DB_CONNECT_RETRIES:-30}
+      - DB_CONNECT_RETRY_DELAY=${DB_CONNECT_RETRY_DELAY:-2}
+      - DB_CONNECT_TIMEOUT=${DB_CONNECT_TIMEOUT:-10}
     depends_on:
       redis:
         condition: service_healthy
@@ -240,12 +249,15 @@ services:
       - REDIS_PASSWORD=${REDIS_PASSWORD}
       # 日志
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
-      # MySQL (本地数据库)
-      - MYSQL_HOST=${MYSQL_HOST:-host.docker.internal}
-      - MYSQL_PORT=${MYSQL_PORT:-3306}
-      - MYSQL_USER=${MYSQL_USER:-root}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD}
-      - MYSQL_DATABASE=${MYSQL_DATABASE:-lumapepe}
+      # MySQL (远程数据库：服务器 B 的 Docker MySQL)
+      - DB_HOST=${DB_HOST}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_NAME=${DB_NAME:-lumapepe}
+      - DB_CONNECT_RETRIES=${DB_CONNECT_RETRIES:-30}
+      - DB_CONNECT_RETRY_DELAY=${DB_CONNECT_RETRY_DELAY:-2}
+      - DB_CONNECT_TIMEOUT=${DB_CONNECT_TIMEOUT:-10}
     depends_on:
       redis:
         condition: service_healthy

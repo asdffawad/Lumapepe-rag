@@ -2242,6 +2242,7 @@
         }
         if (state.handoffLoading) return;
 
+        const wasClosed = Number(state.handoffStatus || 0) === 3;
         state.handoffLoading = true;
         updateHandoffUi();
         const res = await apiFetch(API_CONFIG.ENDPOINTS.HANDOFF_REQUEST, {
@@ -2257,7 +2258,7 @@
         if (res.ok) {
             updateHandoffUi(res.data);
             loadSessionHistory(true);
-            showToast('已进入人工客服队列', 'success');
+            showToast(wasClosed ? '已为你重新转接人工客服，请稍候' : '已为你转接人工客服，请稍候', 'success');
         } else {
             updateHandoffUi(null, true);
             const detail = res.data?.detail;
@@ -2282,7 +2283,7 @@
         if (state.kefuWs && state.kefuWs.readyState === WebSocket.OPEN && Number(state.kefuConversationId) === Number(conversationId)) {
             return;
         }
-        if (state.kefuConnecting) return;
+        if (state.kefuConnecting && Number(state.kefuConversationId) === Number(conversationId)) return;
 
         closeKefuUserWebSocket();
         state.kefuConnecting = true;
@@ -2290,9 +2291,11 @@
 
         const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
         const wsUrl = `${protocol}//${window.location.host}${API_CONFIG.ENDPOINTS.WS_KEFU_USER}?conversation_id=${encodeURIComponent(conversationId)}`;
-        state.kefuWs = new WebSocket(wsUrl, ['bearer', state.token]);
+        const ws = new WebSocket(wsUrl, ['bearer', state.token]);
+        state.kefuWs = ws;
 
-        state.kefuWs.onopen = () => {
+        ws.onopen = () => {
+            if (state.kefuWs !== ws || Number(state.kefuConversationId) !== Number(conversationId)) return;
             state.kefuConnecting = false;
             if (state.kefuReconnectTimer) {
                 clearTimeout(state.kefuReconnectTimer);
@@ -2300,18 +2303,21 @@
             }
             console.debug('[KefuWS] Connected:', conversationId);
         };
-        state.kefuWs.onmessage = (event) => {
+        ws.onmessage = (event) => {
+            if (state.kefuWs !== ws || Number(state.kefuConversationId) !== Number(conversationId)) return;
             try {
                 handleKefuEvent(JSON.parse(event.data));
             } catch (e) {
                 console.error('[KefuWS] Failed to parse message:', e);
             }
         };
-        state.kefuWs.onerror = () => {
+        ws.onerror = () => {
+            if (state.kefuWs !== ws || Number(state.kefuConversationId) !== Number(conversationId)) return;
             state.kefuConnecting = false;
             showToast('人工客服连接异常', 'error');
         };
-        state.kefuWs.onclose = (event) => {
+        ws.onclose = (event) => {
+            if (state.kefuWs !== ws || Number(state.kefuConversationId) !== Number(conversationId)) return;
             console.debug('[KefuWS] Disconnected:', event.code, event.reason);
             state.kefuConnecting = false;
             state.kefuWs = null;

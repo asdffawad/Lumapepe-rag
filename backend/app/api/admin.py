@@ -690,12 +690,14 @@ async def trigger_incremental_ingest(
         # parent.parent.parent.parent = 项目根目录
         data_dir = str(Path(__file__).resolve().parent.parent.parent.parent / "data")
 
+    from app.config import get_config
+    db_config = get_config().db
     mysql_config = {
-        "host": os.getenv("MYSQL_HOST", "localhost"),
-        "port": int(os.getenv("MYSQL_PORT", "3306")),
-        "user": os.getenv("MYSQL_USER", "root"),
-        "password": os.getenv("MYSQL_PASSWORD", ""),
-            "database": os.getenv("MYSQL_DATABASE", "lumapepe"),
+        "host": db_config.host,
+        "port": db_config.port,
+        "user": db_config.user,
+        "password": db_config.password,
+        "database": db_config.database,
     }
     qdrant_config = {
         "host": os.getenv("QDRANT_HOST", "localhost"),

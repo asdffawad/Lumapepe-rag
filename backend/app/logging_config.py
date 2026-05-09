@@ -49,6 +49,8 @@ class JSONFormatter(logging.Formatter):
             "db_port",
             "db_name",
             "db_user",
+            "db_connect_retries",
+            "db_connect_timeout",
             "conversation_id",
             "conversation_status",
             "conversation_user_id",

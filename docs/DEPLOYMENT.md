@@ -31,7 +31,7 @@
 
 - [ ] Docker 已安装并运行
 - [ ] Docker Compose 已安装
-- [ ] 端口未被占用：80, 443, 3306, 6379, 8000, 19530, 9091
+- [ ] 端口未被占用：80, 443, 6379, 8000, 19530, 9091
 - [ ] 已获取 OpenAI API Key（如继续使用 Qwen/STT/Embedding，则还需 DashScope API Key）
 - [ ] 防火墙/安全组已配置
 
@@ -83,12 +83,15 @@ JWT_SECRET=your-random-secret-here-32chars
 CORS_ORIGINS=https://your-domain.com,https://admin.your-domain.com
 
 # === MySQL 配置 ===
-MYSQL_HOST=mysql
-MYSQL_PORT=3306
-MYSQL_USER=root
-MYSQL_PASSWORD=your-strong-password-here
-MYSQL_DATABASE=rag_customer_service
-MYSQL_POOL_SIZE=10
+DB_HOST=10.0.0.25
+DB_PORT=3306
+DB_USER=your-mysql-user
+DB_PASSWORD=your-strong-password-here
+DB_NAME=lumapepe
+DB_CONNECT_RETRIES=30
+DB_CONNECT_RETRY_DELAY=2
+DB_CONNECT_TIMEOUT=10
+DB_POOL_SIZE=10
 
 # === Redis 配置 ===
 REDIS_URL=redis://redis:6379/0
@@ -424,8 +427,9 @@ docker-compose logs redis | grep -i error
 # 检查 Redis 内存
 redis-cli -h localhost -p 6379 info memory
 
-# 检查 session 表
-docker exec -it rag-mysql mysql -u root -p -e "SELECT COUNT(*) FROM rag_customer_service.sessions;"
+# 检查远程 MySQL 中的 RAG 会话表
+mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
+  -e "SELECT COUNT(*) FROM ${DB_NAME:-lumapepe}.ragz_sessions;"
 ```
 
 #### Q5: 限流误触
@@ -600,13 +604,13 @@ RATE_LIMIT_WINDOW=60
 ### 10.1 MySQL 备份
 
 ```bash
-# 备份脚本
-docker exec rag-mysql mysqldump -u root -p$MYSQL_PASSWORD rag_customer_service \
+# 备份脚本（远程 MySQL）
+mysqldump -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" "${DB_NAME:-lumapepe}" \
   > backup_$(date +%Y%m%d_%H%M%S).sql
 
 # 自动备份（每天凌晨 2 点）
-0 2 * * * docker exec rag-mysql mysqldump -u root -p$MYSQL_PASSWORD \
-  rag_customer_service > /backup/mysql_$(date +\%Y\%m\%d).sql
+0 2 * * * mysqldump -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
+  "${DB_NAME:-lumapepe}" > /backup/mysql_$(date +\%Y\%m\%d).sql
 ```
 
 ### 10.2 Redis 备份
@@ -635,9 +639,9 @@ docker exec rag-milvus milvus-backup backup -n backup_name
 # 1. 停止服务
 docker-compose down
 
-# 2. 恢复 MySQL
-docker exec -i rag-mysql mysql -u root -p$MYSQL_PASSWORD \
-  rag_customer_service < backup_20260101.sql
+# 2. 恢复远程 MySQL
+mysql -h "$DB_HOST" -P "$DB_PORT" -u "$DB_USER" -p"$DB_PASSWORD" \
+  "${DB_NAME:-lumapepe}" < backup_20260101.sql
 
 # 3. 恢复 Redis
 docker cp ./backup/redis_20260101.rdb rag-redis:/data/dump.rdb

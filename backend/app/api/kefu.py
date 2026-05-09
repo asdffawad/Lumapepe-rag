@@ -38,6 +38,7 @@ SENDER_AI = 3
 SENDER_SYSTEM = 4
 
 CONTENT_TEXT = 1
+KEFU_LOCAL_NOW_SQL = "DATE_ADD(UTC_TIMESTAMP(), INTERVAL 8 HOUR)"
 
 
 class HandoffRequest(BaseModel):
@@ -78,6 +79,30 @@ def _merge_dict(base: dict, updates: dict) -> dict:
         else:
             merged[key] = value
     return merged
+
+
+def _conversation_status_value(conversation: dict | None) -> int | None:
+    if not conversation:
+        return None
+    try:
+        return int(conversation.get("status"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _handoff_history_with(metadata: dict | None, records: list[dict]) -> list[dict]:
+    raw_history = (metadata or {}).get("handoff_history")
+    history = [dict(item) for item in raw_history if isinstance(item, dict)] if isinstance(raw_history, list) else []
+    for record in records:
+        conversation_id = record.get("conversation_id")
+        record_status = record.get("status")
+        exists = any(
+            item.get("conversation_id") == conversation_id and item.get("status") == record_status
+            for item in history
+        )
+        if not exists:
+            history.append(record)
+    return history
 
 
 def _truncate(text: str | None, limit: int = 2048) -> str:
@@ -135,17 +160,17 @@ def _ws_subprotocol(websocket: WebSocket) -> str | None:
 
 def _db_log_context() -> dict[str, Any]:
     return {
-        "db_host": os.getenv("MYSQL_HOST") or os.getenv("DB_HOST"),
-        "db_port": os.getenv("MYSQL_PORT") or os.getenv("DB_PORT"),
-        "db_name": os.getenv("MYSQL_DATABASE") or os.getenv("DB_NAME"),
-        "db_user": os.getenv("MYSQL_USER") or os.getenv("DB_USER"),
+        "db_host": os.getenv("DB_HOST") or os.getenv("MYSQL_HOST"),
+        "db_port": os.getenv("DB_PORT") or os.getenv("MYSQL_PORT"),
+        "db_name": os.getenv("DB_NAME") or os.getenv("MYSQL_DATABASE"),
+        "db_user": os.getenv("DB_USER") or os.getenv("MYSQL_USER"),
     }
 
 
 def _handoff_status_from_conversation(conversation: dict | None) -> int:
     if not conversation:
         return HANDOFF_AI
-    status_val = conversation.get("status")
+    status_val = _conversation_status_value(conversation)
     if status_val == 0:
         return HANDOFF_PENDING
     if status_val == 1:
@@ -263,11 +288,13 @@ class KefuRepository:
         async with self.pool.acquire() as conn:
             async with conn.cursor(aiomysql.DictCursor) as cur:
                 await cur.execute(
-                    """
+                    f"""
                     INSERT INTO promotion_kefu_conversation
                     (user_id, last_message_time, last_message_content, last_message_content_type,
-                     admin_unread_message_count, status, last_user_message_time, creator, tenant_id)
-                    VALUES (%s, NOW(), %s, %s, 1, 0, NOW(), 'rag_handoff', %s)
+                     admin_unread_message_count, status, last_user_message_time, creator, tenant_id,
+                     create_time, update_time)
+                    VALUES (%s, {KEFU_LOCAL_NOW_SQL}, %s, %s, 1, 0, {KEFU_LOCAL_NOW_SQL}, 'rag_handoff', %s,
+                            {KEFU_LOCAL_NOW_SQL}, {KEFU_LOCAL_NOW_SQL})
                     """,
                     (
                         member_user["id"],
@@ -309,7 +336,7 @@ class KefuRepository:
             assignments.append("handoff_status = %s")
             params.append(handoff_status)
         if set_handoff_at:
-            assignments.append("handoff_at = COALESCE(handoff_at, NOW())")
+            assignments.append("handoff_at = NOW()")
         if metadata_updates is not None:
             merged_metadata = _merge_dict(session.get("metadata") or {}, metadata_updates)
             assignments.append("metadata = %s")
@@ -446,6 +473,7 @@ class KefuRepository:
                     LEFT JOIN member_user mu ON mu.id = c.user_id
                     WHERE s.handoff_status IN (1, 2)
                       AND c.deleted = b'0'
+                      AND c.status IN (0, 1)
                     ORDER BY COALESCE(s.handoff_at, c.create_time) DESC
                     LIMIT %s
                     """,
@@ -677,11 +705,16 @@ class KefuRepository:
     ) -> None:
         assignments = [
             "last_message_content = %s",
-            "last_message_time = NOW()",
+            f"last_message_time = {KEFU_LOCAL_NOW_SQL}",
             "last_message_content_type = %s",
             "updater = 'rag_handoff'",
+            f"update_time = {KEFU_LOCAL_NOW_SQL}",
         ]
         params: list[Any] = [_truncate(content), content_type]
+        if unread_field == "admin_unread_message_count":
+            assignments.append(f"last_user_message_time = {KEFU_LOCAL_NOW_SQL}")
+        elif unread_field == "user_unread_message_count":
+            assignments.append(f"last_admin_reply_time = {KEFU_LOCAL_NOW_SQL}")
         if unread_field:
             assignments.append(f"{unread_field} = COALESCE({unread_field}, 0) + 1")
         params.append(conversation_id)
@@ -742,8 +775,9 @@ class KefuRepository:
                     UPDATE promotion_kefu_conversation
                     SET status = 1,
                         assigned_admin_id = %s,
-                        assigned_at = COALESCE(assigned_at, NOW()),
-                        updater = 'rag_handoff'
+                        assigned_at = COALESCE(assigned_at, """ + KEFU_LOCAL_NOW_SQL + """),
+                        updater = 'rag_handoff',
+                        update_time = """ + KEFU_LOCAL_NOW_SQL + """
                     WHERE id = %s AND deleted = b'0'
                     """,
                     (admin_id, conversation_id),
@@ -762,7 +796,8 @@ class KefuRepository:
                     UPDATE promotion_kefu_conversation
                     SET status = 2,
                         disconnect_reason = %s,
-                        updater = 'rag_handoff'
+                        updater = 'rag_handoff',
+                        update_time = """ + KEFU_LOCAL_NOW_SQL + """
                     WHERE id = %s AND deleted = b'0'
                     """,
                     (close_reason, conversation_id),
@@ -798,18 +833,29 @@ def _build_handoff_metadata(
     member_user_id: int,
     handoff_status: int,
     extra: dict | None = None,
+    trigger_source: str | None = None,
+    reason: str | None = None,
+    handoff_history: list[dict] | None = None,
 ) -> dict:
     handoff = {
         "kefu_conversation_id": conversation_id,
+        "current_conversation_id": conversation_id,
         "member_user_id": member_user_id,
         "status": handoff_status,
         "updated_at": datetime.now().isoformat(),
     }
     if handoff_status == HANDOFF_PENDING:
         handoff["requested_at"] = datetime.now().isoformat()
+    if trigger_source:
+        handoff["trigger_source"] = trigger_source
+    if reason:
+        handoff["reason"] = reason
     if extra:
         handoff.update(extra)
-    return {"handoff": handoff}
+    updates = {"handoff": handoff}
+    if handoff_history is not None:
+        updates["handoff_history"] = handoff_history
+    return updates
 
 
 def _require_conversation(conversation: dict | None) -> dict:
@@ -861,14 +907,16 @@ def _raise_send_error(exc: Exception) -> None:
     raise exc
 
 
-@router.post("/api/kefu/handoff/request")
-async def request_handoff(
-    request: HandoffRequest,
-    current_user: AuthUser = Depends(get_current_user),
-    repo: KefuRepository = Depends(get_kefu_repo),
-):
-    session = _require_owned_session(await repo.get_session(request.session_id), current_user)
-    member_user = await repo.resolve_member_user(current_user.user_id)
+async def request_handoff_for_session(
+    *,
+    session_id: str,
+    user_id: str,
+    repo: KefuRepository,
+    trigger_source: str = "manual_button",
+    reason: str | None = None,
+) -> dict:
+    session = _require_owned_session(await repo.get_session(session_id), AuthUser(user_id=user_id, role="user"))
+    member_user = await repo.resolve_member_user(user_id)
     if not member_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -880,8 +928,16 @@ async def request_handoff(
 
     conversation = None
     created = False
+    old_closed_conversation = None
     if session.get("kefu_conversation_id"):
         conversation = await repo.get_conversation(int(session["kefu_conversation_id"]))
+
+    if conversation and _conversation_status_value(conversation) == 2:
+        old_closed_conversation = conversation
+        conversation = None
+
+    if conversation and _conversation_status_value(conversation) not in (0, 1):
+        conversation = None
 
     if not conversation:
         metadata = session.get("metadata") or {}
@@ -889,11 +945,32 @@ async def request_handoff(
         last_content = ""
         if recent_messages:
             last_content = str(recent_messages[-1].get("content") or "")
-        last_content = last_content or session.get("summary") or "用户请求转人工客服"
+        last_content = last_content or session.get("summary") or reason or "用户请求转人工客服"
         conversation = await repo.create_conversation(member_user, session, last_content)
         created = True
 
     handoff_status = _handoff_status_from_conversation(conversation)
+    metadata = session.get("metadata") or {}
+    requested_at = datetime.now().isoformat()
+    effective_reason = reason or ("用户重新发起转人工" if old_closed_conversation else None)
+    history_records: list[dict] = []
+    if old_closed_conversation:
+        history_records.append({
+            "conversation_id": int(old_closed_conversation["id"]),
+            "status": "closed",
+            "closed_at": requested_at,
+        })
+    if created:
+        requested_record = {
+            "conversation_id": int(conversation["id"]),
+            "status": "requested",
+            "requested_at": requested_at,
+            "trigger_source": trigger_source,
+        }
+        if effective_reason:
+            requested_record["reason"] = effective_reason
+        history_records.append(requested_record)
+    handoff_history = _handoff_history_with(metadata, history_records) if history_records else None
     updated_session = await repo.update_session_handoff(
         session["id"],
         member_user_id=member_user["id"],
@@ -903,8 +980,11 @@ async def request_handoff(
             conversation_id=conversation["id"],
             member_user_id=member_user["id"],
             handoff_status=handoff_status,
+            trigger_source=trigger_source,
+            reason=effective_reason,
+            handoff_history=handoff_history,
         ),
-        set_handoff_at=True,
+        set_handoff_at=created,
     )
     await repo.link_session_messages(
         session["id"],
@@ -914,13 +994,18 @@ async def request_handoff(
 
     if created:
         summary = session.get("summary") or "暂无摘要"
+        system_content = f"用户请求转人工。AI 会话摘要：{summary}"
+        if trigger_source == "ai_detected_intent":
+            system_content = f"用户请求转人工（AI 自动识别）。AI 会话摘要：{summary}"
+            if effective_reason:
+                system_content += f"\n用户原话：{effective_reason}"
         system_message = await repo.insert_kefu_message(
             conversation_id=conversation["id"],
             sender_id=0,
             sender_type=SENDER_SYSTEM,
             receiver_id=member_user["id"],
             receiver_type=SENDER_USER,
-            content=f"用户请求转人工。AI 会话摘要：{summary}",
+            content=system_content,
             tenant_id=member_user.get("tenant_id") or 0,
         )
         await publish_kefu_event({
@@ -931,6 +1016,7 @@ async def request_handoff(
             "handoff_status": handoff_status,
             "session_id": session["id"],
             "member_user_id": member_user["id"],
+            "trigger_source": trigger_source,
         })
         await publish_kefu_event(_message_event(conversation["id"], system_message, target="all_admins"))
 
@@ -945,6 +1031,21 @@ async def request_handoff(
     }
 
 
+@router.post("/api/kefu/handoff/request")
+async def request_handoff(
+    request: HandoffRequest,
+    current_user: AuthUser = Depends(get_current_user),
+    repo: KefuRepository = Depends(get_kefu_repo),
+):
+    return await request_handoff_for_session(
+        session_id=request.session_id,
+        user_id=current_user.user_id,
+        repo=repo,
+        trigger_source="manual_button",
+        reason=None,
+    )
+
+
 @router.get("/api/kefu/handoff/status")
 async def get_handoff_status(
     session_id: str = Query(..., min_length=1),
@@ -955,12 +1056,30 @@ async def get_handoff_status(
     conversation = None
     if session.get("kefu_conversation_id"):
         conversation = await repo.get_conversation(int(session["kefu_conversation_id"]))
+    handoff_status = session.get("handoff_status") or HANDOFF_AI
+    conversation_status = conversation.get("status") if conversation else None
+    if _conversation_status_value(conversation) == 2 and handoff_status in (HANDOFF_PENDING, HANDOFF_ACCEPTED):
+        updated_session = await repo.update_session_handoff(
+            session["id"],
+            handoff_status=HANDOFF_CLOSED,
+            metadata_updates=_build_handoff_metadata(
+                conversation_id=int(conversation["id"]),
+                member_user_id=int(conversation.get("user_id") or session.get("member_user_id") or 0),
+                handoff_status=HANDOFF_CLOSED,
+                extra={
+                    "closed_at": datetime.now().isoformat(),
+                    "close_reason": conversation.get("disconnect_reason"),
+                },
+            ),
+        )
+        session = updated_session
+        handoff_status = HANDOFF_CLOSED
 
     return {
         "session_id": session["id"],
-        "handoff_status": session.get("handoff_status") or HANDOFF_AI,
+        "handoff_status": handoff_status,
         "kefu_conversation_id": session.get("kefu_conversation_id"),
-        "conversation_status": conversation.get("status") if conversation else None,
+        "conversation_status": conversation_status,
         "assigned_admin_id": conversation.get("assigned_admin_id") if conversation else None,
         "handoff_at": session.get("handoff_at"),
         "updated_at": session.get("updated_at"),
@@ -1114,6 +1233,11 @@ async def accept_handoff_request(
             status_code=status.HTTP_404_NOT_FOUND,
             detail={"code": "HANDOFF_NOT_FOUND", "message": "转人工请求不存在"},
         )
+    if _conversation_status_value(detail.get("conversation")) == 2:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "CONVERSATION_CLOSED", "message": "客服会话已关闭，不能重新接入"},
+        )
     admin_user = await repo.resolve_admin_user(current_user.user_id)
     if not admin_user:
         raise HTTPException(
@@ -1179,6 +1303,12 @@ async def close_handoff_request(
     session = detail["ragz_session"]
     member_user = detail.get("member_user") or {}
     closed_at = datetime.now().isoformat()
+    handoff_history = _handoff_history_with(session.get("metadata") or {}, [{
+        "conversation_id": int(conversation_id),
+        "status": "closed",
+        "closed_at": closed_at,
+        "close_reason": request.close_reason,
+    }])
     await repo.update_session_handoff(
         session["id"],
         handoff_status=HANDOFF_CLOSED,
@@ -1186,6 +1316,7 @@ async def close_handoff_request(
             conversation_id=conversation_id,
             member_user_id=conversation["user_id"],
             handoff_status=HANDOFF_CLOSED,
+            handoff_history=handoff_history,
             extra={
                 "close_reason": request.close_reason,
                 "resolution_note": request.resolution_note,

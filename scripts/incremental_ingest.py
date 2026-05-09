@@ -72,23 +72,23 @@ def build_mysql_config() -> MySQLConfig:
     从环境变量构建 MySQL 配置
     
     环境变量:
-        MYSQL_HOST: 数据库主机（默认 127.0.0.1）
-        MYSQL_PORT: 端口（默认 3306）
-        MYSQL_USER: 用户名（默认 root）
-        MYSQL_PASSWORD: 密码（默认空）
-        MYSQL_DATABASE: 数据库名（默认 knowledge_rag）
+        DB_HOST: 数据库主机（服务器 B 的 MySQL IP；兼容 MYSQL_HOST）
+        DB_PORT: 端口（默认 3306；兼容 MYSQL_PORT）
+        DB_USER: 用户名（兼容 MYSQL_USER）
+        DB_PASSWORD: 密码（兼容 MYSQL_PASSWORD）
+        DB_NAME: 数据库名（默认 lumapepe；兼容 MYSQL_DATABASE）
     
     Returns:
         MySQLConfig 配置对象
     """
     return MySQLConfig(
-        host=os.environ.get("MYSQL_HOST", "127.0.0.1"),
-        port=int(os.environ.get("MYSQL_PORT", "3306")),
-        user=os.environ.get("MYSQL_USER", "root"),
-        password=os.environ.get("MYSQL_PASSWORD", ""),
-        database=os.environ.get("MYSQL_DATABASE", "knowledge_rag"),
-        pool_size=int(os.environ.get("MYSQL_POOL_SIZE", "5")),
-        pool_recycle=int(os.environ.get("MYSQL_POOL_RECYCLE", "3600")),
+        host=os.environ.get("DB_HOST") or os.environ.get("MYSQL_HOST", ""),
+        port=int(os.environ.get("DB_PORT") or os.environ.get("MYSQL_PORT", "3306")),
+        user=os.environ.get("DB_USER") or os.environ.get("MYSQL_USER", ""),
+        password=os.environ.get("DB_PASSWORD") or os.environ.get("MYSQL_PASSWORD", ""),
+        database=os.environ.get("DB_NAME") or os.environ.get("MYSQL_DATABASE", "lumapepe"),
+        pool_size=int(os.environ.get("DB_POOL_SIZE") or os.environ.get("MYSQL_POOL_SIZE", "5")),
+        pool_recycle=int(os.environ.get("DB_POOL_RECYCLE") or os.environ.get("MYSQL_POOL_RECYCLE", "3600")),
     )
 
 

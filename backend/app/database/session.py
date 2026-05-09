@@ -288,7 +288,7 @@ class SessionRepository:
             assignments.append("handoff_status = %s")
             params.append(handoff_status)
         if handoff_at_now:
-            assignments.append("handoff_at = COALESCE(handoff_at, NOW())")
+            assignments.append("handoff_at = NOW()")
         if not assignments:
             return
         params.append(session_id)
@@ -302,7 +302,12 @@ class SessionRepository:
     def _row_to_record(self, row: dict) -> SessionRecord:
         metadata = row.get("metadata")
         if isinstance(metadata, str):
-            metadata = json_module.loads(metadata)
+            try:
+                metadata = json_module.loads(metadata) if metadata else {}
+            except json_module.JSONDecodeError:
+                metadata = {}
+        if not isinstance(metadata, dict):
+            metadata = {}
         return SessionRecord(
             id=row["id"],
             user_id=row["user_id"],

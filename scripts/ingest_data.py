@@ -578,15 +578,15 @@ def main():
     parser.add_argument("--reset", action="store_true", help="删除已有 collection 后重新摄取")
 
     # MySQL 配置
-    parser.add_argument("--mysql-host", default=os.getenv("MYSQL_HOST", "localhost"), help="MySQL host")
-    parser.add_argument("--mysql-port", type=int, default=int(os.getenv("MYSQL_PORT", "3306")), help="MySQL port")
-    parser.add_argument("--mysql-user", default=os.getenv("MYSQL_USER", "root"), help="MySQL user")
+    parser.add_argument("--mysql-host", default=os.getenv("DB_HOST") or os.getenv("MYSQL_HOST", ""), help="MySQL host")
+    parser.add_argument("--mysql-port", type=int, default=int(os.getenv("DB_PORT") or os.getenv("MYSQL_PORT", "3306")), help="MySQL port")
+    parser.add_argument("--mysql-user", default=os.getenv("DB_USER") or os.getenv("MYSQL_USER", ""), help="MySQL user")
     parser.add_argument(
-        "--mysql-password", default=os.getenv("MYSQL_PASSWORD", ""), help="MySQL password"
+        "--mysql-password", default=os.getenv("DB_PASSWORD") or os.getenv("MYSQL_PASSWORD", ""), help="MySQL password"
     )
     parser.add_argument(
         "--mysql-database",
-        default=os.getenv("MYSQL_DATABASE", "rag_customer_service"),
+        default=os.getenv("DB_NAME") or os.getenv("MYSQL_DATABASE", "lumapepe"),
         help="MySQL database name",
     )
 

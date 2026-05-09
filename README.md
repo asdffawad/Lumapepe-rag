@@ -29,10 +29,11 @@ docker compose logs -f backend
 | 前端页面 | http://localhost:80 |
 | Prometheus 监控 | http://localhost:8000/metrics |
 | Redis | localhost:6380 |
-| MySQL | localhost:3307 |
+| MySQL | 通过 `DB_HOST` 远程连接服务器 B |
 | Milvus | localhost:19531（API）、localhost:9092（控制台） |
 
-> **注意**：本地端口与 Docker 内部端口不同（MySQL 3306→3307、Redis 6379→6380、Milvus 9091→9092），如遇端口冲突请修改 `docker-compose.yml` 中的映射。
+> **注意**：MySQL 不随本项目 Compose 在服务器 A 启动；请在 `.env` 中将 `DB_HOST` 设置为服务器 B 的 MySQL IP，数据库名保持 `lumapepe`。
+> 可用 `GET /api/health/db` 或 `GET /api/v1/health/db` 检查容器实际连接到的库和必需业务表。
 
 ### 3. 使用真实 LLM（可选）
 
@@ -69,7 +70,6 @@ docker compose up -d --force-recreate backend
 | `rag-backend` | FastAPI 后端服务（Uvicorn） |
 | `rag-celery-worker` | Celery 异步任务 Worker |
 | `rag-celery-beat` | Celery 定时任务调度器（RedBeat） |
-| `rag-mysql` | MySQL 8.0 数据库 |
 | `rag-redis` | Redis 7 缓存（兼 Celery Broker） |
 | `rag-milvus` | Milvus v2.4.14 向量数据库（Standalone 模式） |
 | `rag-frontend` | 前端页面（Nginx 反向代理） |

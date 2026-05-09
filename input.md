@@ -1,440 +1,421 @@
-请基于当前项目代码，新增或修复"AI 客服自动识别用户转人工意图并触发转人工"的功能。
+> 本次修复重点：用户重新发起转人工时，绝不能复用 `status=2` 已结束的 `promotion_kefu_conversation`；必须创建新的 conversation，并把 `ragz_sessions.kefu_conversation_id` 更新为新 ID。
 
-当前项目背景：
 
-项目是 RAG 智能客服系统，已经具备：
+# 修复：用户重新发起转人工客服请求后，后台显示请求已结束无法操作
 
-- 用户与 AI 客服对话
-- RAG 回复
-- 用户手动点击"转人工客服"按钮
-- 创建或关联 promotion_kefu_conversation
-- ragz_sessions.handoff_status 转人工状态
-- 客服后台 admin.html 查看转人工请求
-- 客服接入与关闭请求
-- 人工客服 WebSocket 聊天能力
+## 问题描述
 
-现在希望新增能力：
+用户重新发起转人工客服请求后，后台人工客服管理中显示请求已结束，无法继续操作。
 
-当用户在聊天中输入明显希望转人工的内容时，AI 客服可以自动帮用户发起转人工。
+**当前现象：**
 
-例如用户输入：
+1. 用户发起转人工客服请求。
+2. 客服后台可以接入。
+3. 客服关闭请求后，该请求状态变为已结束。
+4. 用户再次发起转人工客服请求。
+5. `admin.html` 人工客服管理中出现请求，但该请求显示"已结束"。
+6. 后台无法再次接入、回复或关闭。
 
-- 转人工
-- 人工客服
-- 我要找人工
-- 找客服
-- 联系客服
-- 帮我转人工
-- 真人客服
-- 找人处理
-- 我要人工处理
-- 你解决不了，找人工
-- 投诉
-- 退款问题找客服
-- 售后人工
-- 订单异常找人工
+**根因分析：**
 
-系统应该自动触发转人工流程。
+新请求错误复用了旧的已关闭 `promotion_kefu_conversation`。
+
+**修复范围：**
+
+只修复转人工请求创建/复用逻辑、状态同步逻辑和前端状态恢复逻辑，不要大重构。
 
 ---
 
-## 一、目标行为
+## 一、代码定位
 
-用户在 http://localhost/?user_id=288 页面中正常和 AI 客服对话。
+请检查以下文件，路径以当前项目实际结构为准：
 
-当用户输入具有转人工意图的消息时：
+- `backend/app/api/kefu.py`
+- `backend/app/api/websocket.py`
+- `backend/app/services/session_service.py`
+- `backend/app/database/session.py`
+- `backend/app/database/message.py`
+- `frontend/index.html`
+- `frontend/admin.html`
 
-1. 后端识别该消息是"转人工意图"。
-2. 不再继续走 RAG 生成普通 AI 回复。
-3. 调用或复用现有转人工逻辑。
-4. 创建或复用 promotion_kefu_conversation。
-5. 更新 ragz_sessions.handoff_status = 1。
-6. 写入必要的系统记录，例如"用户请求转人工"。
-7. 返回给用户简洁提示：
+### 重点定位项
 
-   已为你转接人工客服，请稍候。
-
-8. 用户端进入 waiting_human 状态。
-9. 用户端连接 /ws/kefu/user。
-10. admin.html 人工客服管理中可以看到新的转人工请求。
-11. 如果用户重复输入"转人工"，不要重复创建多个 promotion_kefu_conversation。
-12. 如果当前会话已经是 handoff_status = 1 或 2，则不要再次触发，只返回当前状态。
-
----
-
-## 二、不要做的事情
-
-请注意：
-
-1. 不要只让 AI 回复"好的，我帮你转人工"，但实际没有创建客服会话。
-2. 不要重复创建 promotion_kefu_conversation。
-3. 不要破坏用户手动点击"转人工客服"按钮的逻辑。
-4. 不要让 summary / metadata 显示到用户聊天窗口。
-5. 不要把人工客服消息写进 ragz_messages。
-6. 不要影响普通 AI 问答。
-7. 不要大重构现有 WebSocket。
-8. 不要新增一套独立转人工系统，必须复用现有 handoff API / service 逻辑。
+1. `POST /api/kefu/handoff/request`
+2. `HandoffService.request_handoff`，如果已经抽象
+3. 用户点击"转人工客服"按钮调用逻辑
+4. 用户输入"转人工"自动触发逻辑
+5. 客服关闭请求接口
+6. `ragz_sessions.handoff_status` 更新逻辑
+7. `ragz_sessions.kefu_conversation_id` 复用逻辑
+8. `promotion_kefu_conversation.status` 判断逻辑
+9. `admin.html` 请求列表状态显示逻辑
+10. `admin.html` 是否把已关闭旧请求当作新请求展示
 
 ---
 
-## 三、请先定位现有代码
+## 二、状态定义
 
-请先检查当前项目中这些文件，路径按真实项目为准：
+### 2.1 `promotion_kefu_conversation.status`
 
-- backend/app/api/websocket.py
-- backend/app/api/kefu.py
-- backend/app/services/session_service.py
-- backend/app/database/session.py
-- backend/app/database/message.py
-- frontend/index.html
-- frontend/admin.html
+| 值 | 含义 |
+|----|------|
+| 0 | 待接入 |
+| 1 | 已接入 / 处理中 |
+| 2 | 已结束 |
 
-请确认：
+### 2.2 `ragz_sessions.handoff_status`
 
-1. /ws/chat 中用户消息进入 RAG 前的处理位置。
-2. 当前用户点击"转人工客服"按钮调用的是哪个接口。
-3. 当前 POST /api/kefu/handoff/request 或等价逻辑在哪里。
-4. 当前 ragz_sessions.handoff_status 如何更新。
-5. 当前 promotion_kefu_conversation 如何创建。
-6. 当前 kefu_conversation_id 如何回写到 ragz_sessions。
-7. 当前 index.html 如何进入 waiting_human / human 模式。
-8. 当前 /ws/kefu/user 如何连接。
+| 值 | 含义 |
+|----|------|
+| 0 | AI处理中 |
+| 1 | 等待人工接入 |
+| 2 | 人工客服处理中 |
+| 3 | 人工服务已结束 |
 
 ---
 
-## 四、转人工意图识别
+## 三、核心修复：不要复用已关闭 conversation
 
-请新增一个轻量函数，例如：
+### 3.1 修复原则
+
+**错误的逻辑示例：**
 
 ```python
-def is_handoff_intent(text: str) -> bool:
-    ...
+if session.kefu_conversation_id:
+    return existing_conversation
 ```
 
-识别规则：
-
-- 文本为空时返回 False。
-- 做基础归一化：
-  - strip
-  - lower
-  - 去掉多余空格
-- 命中以下关键词或短语时返回 True：
-  - 转人工
-  - 人工客服
-  - 人工
-  - 真人客服
-  - 找客服
-  - 联系客服
-  - 联系人工
-  - 找人工
-  - 我要人工
-  - 帮我转人工
-  - 转接人工
-  - 人工处理
-  - 找人处理
-  - 客服介入
-  - 投诉
-  - 售后人工
-  - 退款人工
-  - 订单异常
-
-避免误判：
-
-如果用户只是问：
-
-- 什么是人工客服？
-- 如何设置人工客服？
-- 你们有人工客服吗？
-
-可以先不自动转人工，而是让 AI 正常回答。
-
-请实现一个简单但可维护的规则，例如：
-
-- **强触发短语**：直接触发
-  - 转人工
-  - 我要找人工
-  - 帮我转人工
-  - 联系客服
-  - 真人客服
-  - 找人处理
-- **弱触发词**：需要结合上下文或动词
-  - 人工
-  - 客服
-  - 投诉
-  - 退款
-  - 售后
-
-MVP 阶段可以先用规则，不需要引入大模型分类器。
-
-## 五、接入点要求
-
-请在 /ws/chat 处理用户消息时，进入 RAG 前增加判断：
-
-伪代码：
+**正确的逻辑：**
 
 ```python
-async def handle_user_message(...):
-    # 1. 保存或获取当前 session
-    session = await get_or_create_session(...)
+existing = None
+if session.kefu_conversation_id:
+    existing = get_promotion_kefu_conversation(session.kefu_conversation_id)
 
-    # 2. 先检查当前 handoff_status
-    if session.handoff_status in [1, 2]:
-        # 已经在人工流程中
-        # 不调用 RAG
-        # 消息写入 promotion_kefu_message
-        # 推送给客服端
-        return
+if existing and existing.status in [0, 1]:
+    # 0 待接入，1 人工处理中
+    # 可以复用
+    return existing
 
-    # 3. 检查用户消息是否是转人工意图
-    if is_handoff_intent(user_message):
-        # 可以先把用户原始消息写入 ragz_messages，保留 AI 阶段上下文
-        # 然后调用现有转人工 service
-        handoff_result = await request_handoff(
-            session_id=session.id,
-            user_id=current_user_id,
-            reason=user_message,
-            trigger_source="ai_detected_intent"
-        )
+if existing and existing.status == 2:
+    # 已结束，不能复用
+    # 必须创建新的 conversation
+    new_conversation = create_promotion_kefu_conversation(
+        user_id=session.member_user_id,
+        tenant_id=session.tenant_id,
+        status=0
+    )
+    update ragz_sessions
+    set
+        kefu_conversation_id = new_conversation.id,
+        handoff_status = 1,
+        handoff_at = NOW()
+    where id = session.id
+    return new_conversation
 
-        # 发送给用户简洁提示
-        await websocket.send_json({
-            "type": "handoff_started",
-            "event": "handoff.status_changed",
-            "session_id": session.id,
-            "kefu_conversation_id": handoff_result.kefu_conversation_id,
-            "handoff_status": 1,
-            "message": "已为你转接人工客服，请稍候。"
-        })
-
-        # 不再调用 RAG
-        return
-
-    # 4. 否则正常走 RAG
-    await run_rag(...)
+if not existing:
+    # 没有关联 conversation，创建新的
+    new_conversation = create_promotion_kefu_conversation(...)
+    update ragz_sessions...
+    return new_conversation
 ```
 
-要求：
+### 3.2 具体要求
 
-- 转人工意图判断必须发生在 RAG 调用前。
-- 命中转人工意图后，不要继续调用 RAG。
-- 转人工逻辑必须复用已有 handoff 创建逻辑。
-- 如果没有 service，请把现有 POST /api/kefu/handoff/request 内的核心逻辑抽成 service，供 HTTP 和 WebSocket 共用。
-- 不要复制两套创建 promotion_kefu_conversation 的代码。
+- 已结束的 conversation 绝对不能复用。
+- 已结束旧 conversation 不要删除。
+- 旧 conversation 保留历史消息。
+- 重新发起必须创建新 conversation。
+- 新 conversation.status 必须是 0。
+- 新 conversation.id 必须回写到 `ragz_sessions.kefu_conversation_id`。
+- `handoff_status` 必须从 3 改回 1。
+- `admin.html` 应展示新的待接入请求，而不是旧的已结束请求。
 
-## 六、建议抽象 HandoffService
+---
 
-如果当前转人工逻辑只写在 API 里，请抽成 service，例如：
+## 四、关闭接口检查
 
-```python
-class HandoffService:
-    async def request_handoff(
-        self,
-        session_id: str,
-        user_id: str,
-        reason: str | None = None,
-        trigger_source: str = "manual_button"
-    ):
-        ...
+客服关闭请求时，请确认：
+
+- `promotion_kefu_conversation.status = 2`
+- `ragz_sessions.handoff_status = 3`
+- **不要清空旧 conversation 的历史数据**
+
+### 推荐方案
+
+关闭时不清空 `ragz_sessions.kefu_conversation_id`，重新发起时判断旧 `conversation.status = 2` 后创建新 conversation 并用新 `conversation_id` 覆盖。
+
+> 也可以选择关闭时清空 `ragz_sessions.kefu_conversation_id`，但必须保证重新发起时创建新 conversation。推荐第一种，更方便追踪最后一次客服会话。
+
+---
+
+## 五、Metadata 记录重新发起历史
+
+重新发起时不要覆盖原 metadata，请使用 JSON merge，追加类似：
+
+```json
+{
+  "handoff": {
+    "current_conversation_id": 456,
+    "trigger_source": "manual_button",
+    "reason": "用户重新发起转人工",
+    "requested_at": "2026-05-06 12:00:00"
+  },
+  "handoff_history": [
+    {
+      "conversation_id": 123,
+      "status": "closed",
+      "closed_at": "2026-05-06 11:50:00"
+    },
+    {
+      "conversation_id": 456,
+      "status": "requested",
+      "requested_at": "2026-05-06 12:00:00"
+    }
+  ]
+}
 ```
 
-支持两种触发来源：
+### 要求
 
-- `manual_button` — 用户点击按钮
-- `ai_detected_intent` — AI/后端识别用户想转人工
+- 不覆盖 existing metadata。
+- 如果 metadata 不是合法 JSON，要兼容处理。
+- `handoff.current_conversation_id` 必须是新的 `conversation_id`。
+- 可以保留旧 `conversation_id` 到 `handoff_history`。
 
-共同逻辑：
+---
 
-1. 校验 session 属于当前用户。
-2. 查询 ragz_sessions。
-3. 如果已经有 kefu_conversation_id，直接复用。
-4. 如果没有，创建 promotion_kefu_conversation。
-5. 更新 ragz_sessions：
-   - handoff_status = 1
-   - handoff_at = NOW()
-   - kefu_conversation_id
-   - merge metadata，不覆盖原 metadata：
-     ```json
-     {
-       "handoff": {
-         "trigger_source": "ai_detected_intent",
-         "reason": "用户原始输入",
-         "requested_at": "..."
-       }
-     }
-     ```
-6. 写入 promotion_kefu_message 系统记录：用户请求转人工。
-7. 返回：
-   - session_id
-   - kefu_conversation_id
-   - handoff_status
-   - conversation_status
+## 六、admin.html 请求列表修复
 
-## 七、前端 index.html 改造
+请检查后台人工客服管理列表查询和渲染。
 
-用户端需要支持 AI 自动触发转人工事件。
+### 要求
 
-当 /ws/chat 收到以下事件之一时：
+1. **待处理列表**默认只展示：
+   - `promotion_kefu_conversation.status IN (0, 1)`
+   - 或 `ragz_sessions.handoff_status IN (1, 2)`
 
-- `handoff_started`
-- `handoff.status_changed`
+2. **已结束请求**可以显示在历史列表，但不能显示为新的待接入请求。
 
-前端应该：
+3. 用户重新发起后，列表中必须出现新的 conversation：
+   - `status = 0`
+   - 可点击接入
+   - 操作按钮可用
 
-1. 设置 currentSessionId。
-2. 设置 currentKefuConversationId。
-3. 设置 chatMode = "waiting_human"。
-4. 显示简洁提示：已为你转接人工客服，请稍候。
-5. 自动连接：
+4. 如果前端根据旧 `currentKefuConversationId` 渲染详情，需要在重新发起成功后更新为后端返回的新 `conversation_id`。
+
+5. 不要把旧的已结束 conversation 当作当前请求。
+
+---
+
+## 七、index.html 用户端修复
+
+当用户端当前状态为：`handoff_status = 3`，用户再次点击"转人工客服"时：
+
+### 要求
+
+1. 不要因为本地存在旧 `currentKefuConversationId` 而阻止请求。
+
+2. 仍然调用：`POST /api/kefu/handoff/request`
+
+3. 后端返回新的 `kefu_conversation_id` 后，前端必须更新：
    ```javascript
-   new WebSocket(
-     `${wsBaseUrl}/ws/kefu/user?conversation_id=${currentKefuConversationId}`,
-     ["bearer", token]
-   )
+   currentKefuConversationId = result.kefu_conversation_id;
+   chatMode = "waiting_human";
+   handoffStatus = 1;
    ```
 
-要求：
+4. 重新连接：
+   ```
+   /ws/kefu/user?conversation_id=新的conversation_id
+   ```
 
-- 不要继续等待 AI 流式回复。
-- 不要渲染 summary / metadata。
-- 不要重复追加多条系统提示。
+5. 页面提示：已为你转接人工客服，请稍候。
 
-## 八、客服后台效果
+6. 不要继续连接旧的已关闭 conversation。
 
-AI 自动触发转人工后，admin.html 应该和用户点击按钮效果一致。
+---
 
-要求：
+## 八、AI 自动识别转人工修复
 
-- admin.html 人工客服管理中能看到该请求。
-- 请求详情中能看到：
-  - 用户信息
-  - ragz_sessions.summary
-  - ragz_sessions.metadata
-  - 最近 ragz_messages
-  - 触发原因 reason
-  - trigger_source = ai_detected_intent
-- 客服可以接入。
-- 客服接入后，用户页面收到 conversation.accepted。
-- 客服可以正常回复用户。
-- 用户页面实时显示客服消息。
+如果用户在关闭后输入：
 
-## 九、状态兼容
+```
+转人工
+我要找人工
+联系客服
+```
 
-请处理以下情况：
+也要允许重新发起。
 
-### handoff_status = 0
+请检查 `/ws/chat` 中的逻辑：
 
-- 正常 AI 模式。
-- 如果识别到转人工意图，触发转人工。
+```python
+if session.handoff_status == 3 and is_handoff_intent(user_message):
+    result = await handoff_service.request_handoff(...)
+    return
+```
 
-### handoff_status = 1
+### 要求
 
-- 已经等待人工接入。
-- 用户再次输入"转人工"，不要重复创建，只提示：你已进入人工客服队列，请稍候。
+- `handoff_status = 3` 时，不要阻止转人工。
+- 如果是普通消息，可以恢复 AI。
+- 如果是转人工意图，必须创建新的 conversation。
+- 不能复用已关闭 conversation。
 
-### handoff_status = 2
+---
 
-- 人工客服处理中。
-- 用户消息应走人工客服通道，不调用 RAG。
+## 九、数据库验证 SQL
 
-### handoff_status = 3
+修复后请执行或提供以下 SQL 验证：
 
-- 人工服务已结束。
-- 如果用户再次请求转人工，可以创建新的客服会话，或复用当前规则重新发起。
-- MVP 可以先允许重新发起。
+```sql
+SELECT
+  id,
+  user_id,
+  status,
+  assigned_admin_id,
+  last_message_content,
+  last_message_time,
+  tenant_id,
+  deleted,
+  create_time
+FROM promotion_kefu_conversation
+WHERE user_id = 352
+ORDER BY id DESC
+LIMIT 10;
+```
 
-## 十、测试要求
+```sql
+SELECT
+  id,
+  user_id,
+  kefu_conversation_id,
+  handoff_status,
+  handoff_at,
+  updated_at
+FROM ragz_sessions
+WHERE user_id = '352'
+   OR member_user_id = 352
+ORDER BY updated_at DESC
+LIMIT 10;
+```
 
-请测试以下流程：
+### 期望结果
 
-1. **打开**
+**旧 conversation：**
 
-   http://localhost/?user_id=288
+- `status = 2`
 
-2. **用户发送普通问题**
+**新 conversation：**
 
-   你们的物流多久发货？
+- id 不同于旧 conversation
+- `status = 0`
 
-   **期望**：正常走 RAG，不触发转人工
+**ragz_sessions：**
 
-3. **用户输入**
+- `kefu_conversation_id = 新 conversation.id`
+- `handoff_status = 1`
 
-   我要转人工
+---
 
-   **期望**：
-   - 不调用 RAG
-   - 自动创建或复用 promotion_kefu_conversation
-   - ragz_sessions.handoff_status = 1
-   - 用户页面显示"已为你转接人工客服，请稍候。"
-   - 用户端连接 /ws/kefu/user
-   - admin.html 能看到请求
+## 十、测试场景
 
-4. **用户重复输入**
+### 场景 1：关闭后点击按钮重新发起
 
-   转人工
+1. 用户访问：`http://localhost/?user_id=288`
+2. 用户点击转人工。
+3. admin.html 接入请求。
+4. admin.html 关闭请求。
+5. 用户页面显示人工服务已结束。
+6. 用户再次点击转人工。
 
-   **期望**：不重复创建 promotion_kefu_conversation，只提示已在人工队列中
+**期望：**
 
-5. **客服在 admin.html 点击接入**
+- 创建新的 `promotion_kefu_conversation`
+- 新 conversation.status = 0
+- admin.html 显示新的待接入请求
+- 操作按钮可用
+- 用户页面进入等待人工状态
 
-   **期望**：
-   - ragz_sessions.handoff_status = 2
-   - 用户页面实时显示人工客服已接入
+---
 
-6. **客服发送**
+### 场景 2：关闭后输入"转人工"重新发起
 
-   您好，我是人工客服
+1. 人工服务关闭后。
+2. 用户输入：`转人工`
 
-   **期望**：
-   - promotion_kefu_message 写入 sender_type = 2 的消息
-   - 用户页面实时显示客服回复
+**期望：**
 
-7. **用户在人工客服处理中继续发送消息**
+- 不调用 RAG
+- 创建新的 `promotion_kefu_conversation`
+- `ragz_sessions.handoff_status = 1`
+- admin.html 出现新的待接入请求
 
-   **期望**：
-   - 不调用 RAG
-   - 写入 promotion_kefu_message
-   - 客服页面实时收到
+---
 
-8. **测试误判**
+### 场景 3：等待中重复点击
 
-   用户输入：什么是人工客服？
+`handoff_status = 1` 时重复点击。
 
-   **期望**：不自动转人工，正常 AI 回答
+**期望：**
 
-9. **测试用户点击按钮转人工**
+- 不创建新 conversation
+- 复用当前待接入 conversation
+- admin.html 仍只有一个待接入请求
 
-   **期望**：
-   - 仍然正常可用
-   - 与 AI 自动识别转人工共用同一套 service
+---
+
+### 场景 4：人工处理中重复点击
+
+`handoff_status = 2` 时重复点击。
+
+**期望：**
+
+- 不创建新 conversation
+- 用户保持人工处理中
+
+---
+
+### 场景 5：关闭后普通 AI 对话
+
+`handoff_status = 3` 后，用户输入普通问题：`物流多久发货？`
+
+**期望：**
+
+- 可以恢复 AI 流程
+- 不自动创建客服会话
+
+---
 
 ## 十一、验收标准
 
-完成后必须满足：
+修复完成后必须满足：
 
-- 用户点击按钮可以转人工。
-- 用户输入明确转人工意图也可以自动转人工。
-- 自动转人工不会继续调用 RAG。
-- 自动转人工不会重复创建客服会话。
-- 自动转人工请求能出现在 admin.html。
-- 自动转人工后用户端进入 waiting_human。
-- 客服接入和回复流程正常。
-- 普通问题不误触发转人工。
-- "什么是人工客服？"这类咨询不触发转人工。
-- 原有 AI 问答不受影响。
-- 原有历史会话不受影响。
-- 原有人工客服 WebSocket 不受影响。
+- [ ] 已关闭的 `promotion_kefu_conversation.status = 2` 不再被复用。
+- [ ] 重新发起会创建新的 `promotion_kefu_conversation`。
+- [ ] 新 conversation.status = 0。
+- [ ] `ragz_sessions.kefu_conversation_id` 更新为新的 `conversation_id`。
+- [ ] `ragz_sessions.handoff_status` 从 3 改为 1。
+- [ ] admin.html 显示新请求为"待接入"，不是"已结束"。
+- [ ] admin.html 可以对新请求执行接入操作。
+- [ ] 用户端会连接新的 `/ws/kefu/user?conversation_id=新ID`。
+- [ ] 旧请求和旧消息历史仍然保留。
+- [ ] 重复点击不会在待接入/处理中创建多个请求。
+- [ ] 普通 AI 对话不受影响。
+- [ ] 历史会话加载不受影响。
 
-## 十二、最终输出要求
+---
 
-请完成后输出：
+## 完成后输出内容
 
-- 修改了哪些文件。
-- 是否新增 HandoffService。
-- 转人工意图识别函数在哪里。
-- 哪些关键词会触发转人工。
-- 如何避免误判。
-- /ws/chat 中的接入点在哪里。
-- HTTP 按钮转人工和 AI 自动转人工是否复用同一逻辑。
-- 数据库写入了哪些字段。
-- 如何测试。
-- 当前限制和后续优化建议。
+请输出以下内容：
+
+1. **根因**
+2. **修改文件**
+3. **核心代码改动**
+4. **新旧 conversation 状态变化**
+5. **SQL 验证结果**
+6. **前端验证步骤**
+
+---

@@ -30,7 +30,9 @@ if [ ! -f ".env" ]; then
     echo "  - JWT_SECRET"
     echo "  - ADMIN_API_KEYS"
     echo "  - REDIS_PASSWORD"
-    echo "  - MYSQL_ROOT_PASSWORD"
+    echo "  - DB_HOST"
+    echo "  - DB_USER"
+    echo "  - DB_PASSWORD"
     echo "  - DASHSCOPE_API_KEY"
     echo "  - CORS_ORIGINS"
     echo ""
@@ -48,6 +50,21 @@ fi
 
 if [ "$REDIS_PASSWORD" == "CHANGE_ME_generate_with_openssl_rand_hex_16" ]; then
     echo -e "${RED}错误：请修改 .env 中的 REDIS_PASSWORD${NC}"
+    exit 1
+fi
+
+if [ -z "$DB_HOST" ] || [ "$DB_HOST" == "CHANGE_ME_mysql_server_b_ip" ]; then
+    echo -e "${RED}错误：请修改 .env 中的 DB_HOST 为服务器 B 的 MySQL IP${NC}"
+    exit 1
+fi
+
+if [ -z "$DB_USER" ] || [ "$DB_USER" == "CHANGE_ME_mysql_user" ]; then
+    echo -e "${RED}错误：请修改 .env 中的 DB_USER${NC}"
+    exit 1
+fi
+
+if [ -z "$DB_PASSWORD" ] || [ "$DB_PASSWORD" == "CHANGE_ME_mysql_password" ]; then
+    echo -e "${RED}错误：请修改 .env 中的 DB_PASSWORD${NC}"
     exit 1
 fi
 

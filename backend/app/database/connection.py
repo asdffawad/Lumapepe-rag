@@ -16,10 +16,20 @@ if TYPE_CHECKING:
 _db_pool: aiomysql.Pool | None = None
 
 
-async def _wait_for_mysql(config: "DBConfig", max_retries: int = 5, delay: float = 2.0) -> None:
+def _db_target(config: "DBConfig") -> str:
+    return f"{config.host}:{config.port}/{config.database} user={config.user}"
+
+
+async def _wait_for_mysql(
+    config: "DBConfig",
+    max_retries: int | None = None,
+    delay: float | None = None,
+) -> None:
     """等待 MySQL 完全就绪后再创建连接池"""
+    retries = max_retries if max_retries is not None else config.connect_retries
+    retry_delay = delay if delay is not None else config.connect_retry_delay
     last_error = None
-    for attempt in range(1, max_retries + 1):
+    for attempt in range(1, retries + 1):
         try:
             test_conn = await aiomysql.connect(
                 host=config.host,
@@ -28,16 +38,17 @@ async def _wait_for_mysql(config: "DBConfig", max_retries: int = 5, delay: float
                 password=config.password,
                 db=config.database,
                 charset="utf8mb4",
-                connect_timeout=10,
+                connect_timeout=config.connect_timeout,
             )
             test_conn.close()
             return
         except Exception as e:
             last_error = e
-            if attempt < max_retries:
-                await asyncio.sleep(delay * attempt)
+            if attempt < retries:
+                await asyncio.sleep(retry_delay)
     raise RuntimeError(
-        f"MySQL not available after {max_retries} attempts: {last_error}"
+        f"MySQL not available after {retries} attempts "
+        f"for {_db_target(config)}: {last_error}"
     ) from last_error
 
 
@@ -52,8 +63,13 @@ async def create_db_pool(config: "DBConfig") -> aiomysql.Pool:
         except Exception:
             await close_db_pool()
 
+    if not config.host:
+        raise RuntimeError("MySQL DB_HOST is not configured; set DB_HOST to the remote MySQL server IP")
+    if not config.user:
+        raise RuntimeError("MySQL DB_USER is not configured")
+
     # 等待 MySQL 完全就绪（避免容器启动后网络层尚未稳定的瞬时错误）
-    await _wait_for_mysql(config, max_retries=5, delay=2.0)
+    await _wait_for_mysql(config)
 
     _db_pool = await aiomysql.create_pool(
         host=config.host,
@@ -64,8 +80,8 @@ async def create_db_pool(config: "DBConfig") -> aiomysql.Pool:
         minsize=5,
         maxsize=config.pool_size,
         autocommit=True,
-        pool_recycle=3600,
-        connect_timeout=30,
+        pool_recycle=config.pool_recycle,
+        connect_timeout=config.connect_timeout,
         charset="utf8mb4",
     )
     return _db_pool
@@ -83,5 +99,13 @@ async def close_db_pool():
 def get_db_pool() -> aiomysql.Pool:
     """获取当前连接池"""
     if _db_pool is None:
-        raise RuntimeError("Database not connected. Call create_db_pool() first.")
+        try:
+            from app.config import get_config
+            target = _db_target(get_config().db)
+        except Exception:
+            target = "unknown target"
+        raise RuntimeError(
+            f"Database not connected for {target}. "
+            "Startup connection failed or create_db_pool() was not called."
+        )
     return _db_pool

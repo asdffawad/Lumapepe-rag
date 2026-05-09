@@ -45,7 +45,24 @@ async def get_session_service() -> SessionService | None:
         pool = get_db_pool()
         redis = get_redis_client()
         return SessionService(pool, redis)
-    except Exception:
+    except Exception as exc:
+        try:
+            from app.config import get_config
+            db_config = get_config().db
+            error_message = str(exc).replace(db_config.password, "***") if db_config.password else str(exc)
+            extra = {
+                "db_host": db_config.host,
+                "db_port": db_config.port,
+                "db_name": db_config.database,
+                "db_user": db_config.user,
+                "error": f"{type(exc).__name__}: {error_message}",
+            }
+        except Exception:
+            extra = {"error": f"{type(exc).__name__}: {exc}"}
+        _logger.error(
+            "Session service unavailable because database connection failed",
+            extra=extra,
+        )
         return None
 
 
@@ -565,7 +582,7 @@ async def _route_to_kefu_if_handoff(
     handoff_hint: int | None = None,
     conversation_hint: int | None = None,
 ) -> bool:
-    from app.api.kefu import HANDOFF_ACCEPTED, HANDOFF_PENDING
+    from app.api.kefu import HANDOFF_ACCEPTED, HANDOFF_AI, HANDOFF_CLOSED, HANDOFF_PENDING
 
     session = {
         "id": session_id,
@@ -573,7 +590,7 @@ async def _route_to_kefu_if_handoff(
         "kefu_conversation_id": conversation_hint,
     }
     try:
-        from app.api.kefu import KefuRepository, _message_event
+        from app.api.kefu import KefuRepository, _message_event, request_handoff_for_session
         from app.services.redis_pubsub import publish_kefu_event
 
         repo = KefuRepository(get_db_pool())
@@ -594,7 +611,48 @@ async def _route_to_kefu_if_handoff(
     try:
         handoff_status = int((session or {}).get("handoff_status") or 0)
         conversation_id = (session or {}).get("kefu_conversation_id")
+        conversation = None
+        if conversation_id and handoff_status in (HANDOFF_PENDING, HANDOFF_ACCEPTED):
+            conversation = await repo.get_conversation(int(conversation_id))
+            if int((conversation or {}).get("status") or 0) == 2 and handoff_status in (HANDOFF_PENDING, HANDOFF_ACCEPTED):
+                try:
+                    await repo.update_session_handoff(session_id, handoff_status=HANDOFF_CLOSED)
+                except Exception as sync_exc:
+                    _logger.warning(
+                        "Failed to sync closed kefu conversation to session",
+                        extra={"session_id": session_id, "conversation_id": conversation_id, "error": str(sync_exc)},
+                    )
+                handoff_status = HANDOFF_CLOSED
+
         if handoff_status not in (HANDOFF_PENDING, HANDOFF_ACCEPTED):
+            if handoff_status in (HANDOFF_AI, HANDOFF_CLOSED):
+                from app.services.handoff_intent import is_handoff_intent
+
+                if is_handoff_intent(content):
+                    result = await request_handoff_for_session(
+                        session_id=session_id,
+                        user_id=user_id,
+                        repo=repo,
+                        trigger_source="ai_detected_intent",
+                        reason=content,
+                    )
+                    await websocket.send_json({
+                        "type": "handoff_message_received",
+                        "session_id": session_id,
+                        "handoff_status": result["handoff_status"],
+                        "kefu_conversation_id": int(result["kefu_conversation_id"]),
+                        "message": "已为你转接人工客服，请稍候",
+                    })
+                    await websocket.send_json({
+                        "type": "done",
+                        "session_id": session_id,
+                        "intent": "human_handoff",
+                        "sources": [],
+                        "content_length": 0,
+                        "handoff_status": result["handoff_status"],
+                        "kefu_conversation_id": int(result["kefu_conversation_id"]),
+                    })
+                    return True
             return False
         if not conversation_id:
             await websocket.send_json({
@@ -605,7 +663,8 @@ async def _route_to_kefu_if_handoff(
             return True
 
         member_user = await repo.resolve_member_user(user_id)
-        conversation = await repo.get_conversation(int(conversation_id))
+        if not conversation:
+            conversation = await repo.get_conversation(int(conversation_id))
         if not member_user or not conversation or int(conversation.get("user_id") or 0) != int(member_user["id"]):
             await websocket.send_json({
                 "type": "error",

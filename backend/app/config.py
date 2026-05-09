@@ -37,15 +37,18 @@ class EmbeddingConfig:
 
 @dataclass
 class DBConfig:
-    host: str = "localhost"
+    host: str = ""
     port: int = 3306
-    user: str = "root"
+    user: str = ""
     password: str = ""
     database: str = "lumapepe"
     pool_size: int = 10
     max_overflow: int = 20
     pool_recycle: int = 3600
     pool_timeout: int = 30
+    connect_retries: int = 30
+    connect_retry_delay: float = 2.0
+    connect_timeout: int = 10
 
 
 @dataclass
@@ -177,6 +180,18 @@ def _str_to_bool(val: str | None) -> bool:
     return val.lower() in ("1", "true", "yes")
 
 
+def _env_first(*names: str, default: str = "") -> str:
+    for name in names:
+        value = os.getenv(name)
+        if value:
+            return value
+    return default
+
+
+def _int_env_first(*names: str, default: str) -> int:
+    return int(_env_first(*names, default=default))
+
+
 @lru_cache
 def get_config() -> AppConfig:
     llm_provider = os.getenv("LLM_PROVIDER", "mock")
@@ -213,15 +228,18 @@ def get_config() -> AppConfig:
             dim=int(os.getenv("EMBEDDING_DIM", "1024")),
         ),
         db=DBConfig(
-            host=os.getenv("MYSQL_HOST", "localhost"),
-            port=int(os.getenv("MYSQL_PORT", "3306")),
-            user=os.getenv("MYSQL_USER", "root"),
-            password=os.getenv("MYSQL_PASSWORD", ""),
-            database=os.getenv("MYSQL_DATABASE", "lumapepe"),
-            pool_size=int(os.getenv("MYSQL_POOL_SIZE", "10")),
-            max_overflow=int(os.getenv("MYSQL_MAX_OVERFLOW", "20")),
-            pool_recycle=int(os.getenv("MYSQL_POOL_RECYCLE", "3600")),
-            pool_timeout=int(os.getenv("MYSQL_POOL_TIMEOUT", "30")),
+            host=_env_first("DB_HOST", "MYSQL_HOST"),
+            port=_int_env_first("DB_PORT", "MYSQL_PORT", default="3306"),
+            user=_env_first("DB_USER", "MYSQL_USER"),
+            password=_env_first("DB_PASSWORD", "MYSQL_PASSWORD"),
+            database=_env_first("DB_NAME", "MYSQL_DATABASE", default="lumapepe"),
+            pool_size=_int_env_first("DB_POOL_SIZE", "MYSQL_POOL_SIZE", default="10"),
+            max_overflow=_int_env_first("DB_MAX_OVERFLOW", "MYSQL_MAX_OVERFLOW", default="20"),
+            pool_recycle=_int_env_first("DB_POOL_RECYCLE", "MYSQL_POOL_RECYCLE", default="3600"),
+            pool_timeout=_int_env_first("DB_POOL_TIMEOUT", "MYSQL_POOL_TIMEOUT", default="30"),
+            connect_retries=_int_env_first("DB_CONNECT_RETRIES", "MYSQL_CONNECT_RETRIES", default="30"),
+            connect_retry_delay=float(_env_first("DB_CONNECT_RETRY_DELAY", "MYSQL_CONNECT_RETRY_DELAY", default="2")),
+            connect_timeout=_int_env_first("DB_CONNECT_TIMEOUT", "MYSQL_CONNECT_TIMEOUT", default="10"),
         ),
         redis=RedisConfig(
             url=os.getenv("REDIS_URL", "redis://localhost:6379"),

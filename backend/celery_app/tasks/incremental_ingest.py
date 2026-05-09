@@ -33,11 +33,11 @@ def daily_incremental_ingest(dry_run: bool = False, delete_missing: bool = True)
     from pymilvus import Collection, connections, utility
 
     mysql_config = {
-        "host": os.getenv("MYSQL_HOST", "localhost"),
-        "port": int(os.getenv("MYSQL_PORT", "3306")),
-        "user": os.getenv("MYSQL_USER", "root"),
-        "password": os.getenv("MYSQL_PASSWORD", ""),
-        "database": os.getenv("MYSQL_DATABASE", "lumapepe"),
+        "host": os.getenv("DB_HOST") or os.getenv("MYSQL_HOST", ""),
+        "port": int(os.getenv("DB_PORT") or os.getenv("MYSQL_PORT", "3306")),
+        "user": os.getenv("DB_USER") or os.getenv("MYSQL_USER", ""),
+        "password": os.getenv("DB_PASSWORD") or os.getenv("MYSQL_PASSWORD", ""),
+        "database": os.getenv("DB_NAME") or os.getenv("MYSQL_DATABASE", "lumapepe"),
     }
     milvus_config = {
         "host": os.getenv("MILVUS_HOST", "localhost"),

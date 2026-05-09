@@ -12,3 +12,6 @@ assert(html.includes('function selectHistorySession'), 'index.html should restor
 assert(html.includes('function startNewSession'), 'index.html should let the user start a new session without loading by session_id');
 assert(html.includes('window.selectHistorySession = selectHistorySession'), 'history item clicks should be wired');
 assert(html.includes('await selectHistorySession(historyItems[0].id'), 'index.html should auto-select latest user history item');
+assert(html.includes('const ws = new WebSocket'), 'kefu user websocket should keep a per-connection reference');
+assert(html.includes('state.kefuWs !== ws || Number(state.kefuConversationId) !== Number(conversationId)'), 'stale kefu websocket callbacks should not overwrite the active conversation');
+assert(html.includes('state.kefuConnecting && Number(state.kefuConversationId) === Number(conversationId)'), 'kefu reconnect guard should only block the same conversation');

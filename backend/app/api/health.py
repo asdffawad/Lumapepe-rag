@@ -10,27 +10,142 @@ from fastapi import APIRouter, Response
 
 import time
 
+from app.logging_config import get_logger
+
 router = APIRouter(prefix="/api/v1", tags=["health"])
 public_router = APIRouter(prefix="/api", tags=["health"])
+logger = get_logger("health")
+
+REQUIRED_BUSINESS_TABLES = [
+    "ragz_sessions",
+    "ragz_messages",
+    "ragz_documents",
+    "member_user",
+    "promotion_kefu_conversation",
+    "promotion_kefu_message",
+    "system_users",
+]
+
+
+def _db_config_payload() -> dict:
+    from app.config import get_config
+
+    config = get_config()
+    return {
+        "host": config.db.host,
+        "port": config.db.port,
+        "database": config.db.database,
+        "user": config.db.user,
+    }
+
+
+def _row_value(row, key: str, index: int = 0):
+    if isinstance(row, dict):
+        return row.get(key)
+    if row is None:
+        return None
+    return row[index]
+
+
+def _sanitize_db_error(message: str) -> str:
+    from app.config import get_config
+
+    password = get_config().db.password or ""
+    if password:
+        return message.replace(password, "***")
+    return message
+
+
+async def _db_health_payload() -> dict:
+    configured = _db_config_payload()
+    start = time.time()
+    try:
+        from app.database.connection import get_db_pool
+
+        pool = get_db_pool()
+        import aiomysql
+        async with pool.acquire() as conn:
+            async with conn.cursor(aiomysql.DictCursor) as cur:
+                await cur.execute("SELECT DATABASE() AS database_name")
+                db_row = await cur.fetchone()
+                selected_database = _row_value(db_row, "database_name")
+
+                placeholders = ", ".join(["%s"] * len(REQUIRED_BUSINESS_TABLES))
+                await cur.execute(
+                    "SELECT TABLE_NAME FROM information_schema.TABLES "
+                    f"WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME IN ({placeholders})",
+                    REQUIRED_BUSINESS_TABLES,
+                )
+                rows = await cur.fetchall()
+
+        present_set = {_row_value(row, "TABLE_NAME") for row in rows}
+        present = [table for table in REQUIRED_BUSINESS_TABLES if table in present_set]
+        missing = [table for table in REQUIRED_BUSINESS_TABLES if table not in present_set]
+        latency_ms = round((time.time() - start) * 1000)
+        connected_to_expected_db = selected_database == configured["database"] == "lumapepe"
+        schema_ok = not missing
+        return {
+            "ok": connected_to_expected_db,
+            "status": "up" if connected_to_expected_db and schema_ok else "degraded",
+            "configured": configured,
+            "selected_database": selected_database,
+            "latency_ms": latency_ms,
+            "required_tables": {
+                "ok": schema_ok,
+                "present": present,
+                "missing": missing,
+            },
+        }
+    except Exception as exc:
+        latency_ms = round((time.time() - start) * 1000)
+        error_message = _sanitize_db_error(str(exc))
+        logger.error(
+            "MySQL health check failed",
+            extra={
+                "db_host": configured["host"],
+                "db_port": configured["port"],
+                "db_name": configured["database"],
+                "db_user": configured["user"],
+                "error": f"{type(exc).__name__}: {error_message}",
+            },
+        )
+        return {
+            "ok": False,
+            "status": "down",
+            "configured": configured,
+            "selected_database": None,
+            "latency_ms": latency_ms,
+            "required_tables": {
+                "ok": False,
+                "present": [],
+                "missing": REQUIRED_BUSINESS_TABLES,
+            },
+            "error": {
+                "type": type(exc).__name__,
+                "message": error_message,
+            },
+        }
+
+
+def _db_health_response(payload: dict, response: Response) -> dict:
+    if payload.get("status") == "down":
+        response.status_code = 503
+    return payload
 
 
 async def _check_mysql() -> dict:
     """检查 MySQL 连接"""
-    try:
-        from app.database.connection import get_db_pool
-        pool = get_db_pool()
-        if pool is None:
-            return {"status": "down", "latency_ms": 0, "error": "not_connected"}
-        import aiomysql
-        async with pool.acquire() as conn:
-            async with conn.cursor() as cur:
-                start = time.time()
-                await cur.execute("SELECT 1")
-                await cur.fetchone()
-                latency_ms = round((time.time() - start) * 1000)
-        return {"status": "up", "latency_ms": latency_ms}
-    except Exception:
-        return {"status": "down", "latency_ms": 0, "error": "connection_failed"}
+    db = await _db_health_payload()
+    result = {
+        "status": db["status"],
+        "latency_ms": db["latency_ms"],
+        "configured": db["configured"],
+        "selected_database": db["selected_database"],
+        "required_tables": db["required_tables"],
+    }
+    if db.get("error"):
+        result["error"] = db["error"]
+    return result
 
 
 async def _check_redis() -> dict:
@@ -197,3 +312,13 @@ async def redis_health_v1():
 @public_router.get("/health/redis")
 async def redis_health():
     return await _redis_health_payload()
+
+
+@router.get("/health/db")
+async def db_health_v1(response: Response):
+    return _db_health_response(await _db_health_payload(), response)
+
+
+@public_router.get("/health/db")
+async def db_health(response: Response):
+    return _db_health_response(await _db_health_payload(), response)
