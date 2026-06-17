@@ -68,3 +68,4 @@ celerybeat.pid
 .playwright-mcp/
 rag-deploy.tar.gz
 rag-images.tar
+rag-chat.tar.gz
